@@ -1,7 +1,7 @@
 // ============================================================================
 // CAR ADVENTURE WORLD 3D - MASTER GAME ENGINE & THREE.JS CONTROLLER
-// Complete Overhaul: Frame-rate Independent Physics, Smooth Camera,
-// Proper 3D Highway, Smart Multi-Lane Traffic, and Strict Road Boundaries.
+// Complete Overhaul: Road-Aligned Driving, Realistic Grip, Sequential Checkpoints,
+// Clear Mission HUD, 3D Waypoint Compass, Start Briefing, and Separated Controls.
 // ============================================================================
 
 (function () {
@@ -82,6 +82,26 @@
       this.engineOsc.frequency.setTargetAtTime(targetFreq, now, 0.08);
       this.engineFilter.frequency.setTargetAtTime(targetFilter, now, 0.08);
       this.engineGain.gain.setTargetAtTime(targetVol, now, 0.08);
+    }
+
+    playCheckpointChime() {
+      if (!this.ctx || this.sfxVol <= 0) return;
+      try {
+        const now = this.ctx.currentTime;
+        const notes = [587.33, 880.00, 1174.66]; // D5, A5, D6
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+          gain.gain.setValueAtTime(0.22 * this.sfxVol, now + idx * 0.08);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.35);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + idx * 0.08);
+          osc.stop(now + idx * 0.08 + 0.36);
+        });
+      } catch (e) {}
     }
 
     playCoinChime() {
@@ -238,7 +258,12 @@
   }
 
   // --------------------------------------------------------------------------
-  // INPUT CONTROLLER (Responsive Pointer Events & Full Keyboard)
+  // INPUT CONTROLLER (Pointer Events with Pointer Capture & Keyboard)
+  // Cleanly separated:
+  // - Gas: Accelerate forward
+  // - Brake: Decelerate smoothly to 0; holding when stopped switches to Reverse
+  // - Steer Left / Right: Smooth continuous response with spring return
+  // - Space: Dedicated Brake / Handbrake
   // --------------------------------------------------------------------------
   class InputController {
     constructor() {
@@ -248,9 +273,10 @@
       this.steerRight = false;
       this.nitro = false;
       this.horn = false;
+      this.handbrake = false;
 
-      // Filtered steering angle (-1 to +1)
-      this.steerValue = 0;
+      // Filtered steering value: -1.0 (Full Left) to +1.0 (Full Right)
+      this.steerValue = 0.0;
 
       this.setupKeyboard();
       this.setupTouch();
@@ -276,6 +302,10 @@
           case 'ArrowRight':
             this.steerRight = true;
             break;
+          case 'Space':
+            this.handbrake = true;
+            this.brake = true;
+            break;
           case 'ShiftLeft':
           case 'ShiftRight':
           case 'KeyN':
@@ -296,7 +326,7 @@
             if (window.gameInstance) window.gameInstance.togglePause();
             break;
           case 'KeyR':
-            if (window.gameInstance && window.gameInstance.isPlaying) window.gameInstance.respawnCar();
+            if (window.gameInstance && window.gameInstance.isPlaying) window.gameInstance.restartCurrentLevel();
             break;
         }
       });
@@ -309,6 +339,10 @@
             break;
           case 'KeyS':
           case 'ArrowDown':
+            this.brake = false;
+            break;
+          case 'Space':
+            this.handbrake = false;
             this.brake = false;
             break;
           case 'KeyA':
@@ -332,15 +366,15 @@
     }
 
     setupTouch() {
-      // Modern robust Pointer Events with pointer capture:
-      // Prevents dropped touches, allows smooth sliding and multi-finger driving
       const bindPointerBtn = (id, onDown, onUp) => {
         const btn = document.getElementById(id);
         if (!btn) return;
 
         btn.addEventListener('pointerdown', (e) => {
           e.preventDefault();
-          btn.setPointerCapture(e.pointerId);
+          try {
+            btn.setPointerCapture(e.pointerId);
+          } catch (err) {}
           btn.classList.add('active');
           if (window.gameInstance && window.gameInstance.sound) {
             window.gameInstance.sound.init();
@@ -376,13 +410,13 @@
     }
 
     update(dt) {
-      let target = 0;
-      if (this.steerLeft) target -= 1;
-      if (this.steerRight) target += 1;
+      let target = 0.0;
+      if (this.steerLeft) target -= 1.0;
+      if (this.steerRight) target += 1.0;
 
-      // Natural progressive response: fast attack, smooth release
-      const attackRate = 12.0;
-      this.steerValue += (target - this.steerValue) * Math.min(1.0, dt * attackRate);
+      // Fast response when pressed, smooth centering spring when released
+      const rate = target !== 0 ? 12.0 : 8.0;
+      this.steerValue += (target - this.steerValue) * Math.min(1.0, dt * rate);
     }
   }
 
@@ -405,24 +439,26 @@
       this.isPaused = false;
       this.currentLevelIndex = this.data.highestUnlockedLevel || 1;
       this.currentLevel = null;
-      this.cameraMode = 0; // 0: 3rd person chase, 1: Cockpit/1st person, 2: Top-down
+      this.cameraMode = 0; // 0: 3rd person chase, 1: Cockpit, 2: Top-down
 
-      // Fixed-timestep physics accumulator for 100% frame-rate independence
+      // Fixed-timestep physics accumulator (60Hz)
       this.physicsAccumulator = 0;
-      this.FIXED_DT = 1 / 60; // 60Hz physics step
+      this.FIXED_DT = 1 / 60;
 
       // Road Geometry Dimensions
-      this.ROAD_WIDTH = 13.0; // 13 meters wide (3 full 4-meter highway lanes + shoulders)
-      this.LATERAL_LIMIT = 5.2; // Guardrail boundary limit
+      this.ROAD_WIDTH = 13.0; // 13 meters wide (3 highway lanes + shoulders)
+      this.LATERAL_LIMIT = 4.8; // Safe drivable boundary inside curbs (-4.8m to +4.8m)
 
-      // Player Physical State along the Road Spline
-      this.trackDist = 0; // Distance from track start (meters)
-      this.lateralOffset = 0; // Cross-track position (-5.2m left to +5.2m right)
+      // Physical Vehicle State relative to Road Path:
+      this.trackDist = 0; // Distance along road centerline (meters)
+      this.lateralOffset = 0; // Cross-track position (-4.8m left to +4.8m right)
+      this.lateralVel = 0; // Lateral velocity (m/s)
+      this.relativeAngle = 0; // Visual/physical yaw angle relative to road tangent (radians)
       this.speed = 0; // Forward velocity (m/s)
-      this.lateralSpeed = 0; // Lateral velocity across lanes (m/s)
-      this.steerAngle = 0; // Physical steering angle (radians)
+      this.gear = 'D'; // 'D' (Drive), 'R' (Reverse), 'N' (Neutral)
+      this.reverseHoldTime = 0;
 
-      // Car stats tuned from config + upgrades
+      // Performance stats from car config + upgrades
       this.playerMaxSpeed = 24;
       this.playerAccel = 18;
       this.playerHandling = 2.8;
@@ -434,15 +470,19 @@
       this.passengerPickedUp = false;
       this.racePosition = 1;
 
-      // Suspension & dynamics simulation
+      // Dynamic suspension simulation
       this.suspensionPitch = 0;
       this.suspensionRoll = 0;
       this.suspensionBounce = 0;
-      this.verticalVelocity = 0;
 
-      // Smooth camera interpolation vectors
+      // Smooth camera vectors
       this.camPos = new THREE.Vector3(0, 5, -10);
       this.camLookTarget = new THREE.Vector3(0, 1, 10);
+
+      // Objective & Checkpoint Sequence
+      this.objectives = [];
+      this.currentObjectiveIndex = 0;
+      this.checkpoints = [];
 
       // Three.js Core
       this.scene = null;
@@ -454,7 +494,7 @@
 
       // Track & World Entities
       this.trackWaypoints = [];
-      this.trackStep = 10.0; // High resolution waypoint spacing (10m)
+      this.trackStep = 10.0;
       this.trackLength = 500;
       this.trackMeshes = [];
       this.coins = [];
@@ -513,7 +553,6 @@
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       }
 
-      // Lighting: Ambient + Directional Sun
       this.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
       this.scene.add(this.ambientLight);
 
@@ -523,13 +562,6 @@
         this.sunLight.castShadow = true;
         this.sunLight.shadow.mapSize.width = 1024;
         this.sunLight.shadow.mapSize.height = 1024;
-        this.sunLight.shadow.camera.near = 10;
-        this.sunLight.shadow.camera.far = 280;
-        const d = 50;
-        this.sunLight.shadow.camera.left = -d;
-        this.sunLight.shadow.camera.right = d;
-        this.sunLight.shadow.camera.top = d;
-        this.sunLight.shadow.camera.bottom = -d;
       }
       this.scene.add(this.sunLight);
 
@@ -546,10 +578,9 @@
     // UI BINDINGS & SCREEN MANAGEMENT
     // ------------------------------------------------------------------------
     initUI() {
-      // Main Menu Buttons
       document.getElementById('btn-menu-play').addEventListener('click', () => {
         this.sound.init();
-        this.startLevel(this.data.highestUnlockedLevel || 1);
+        this.openMissionBriefing(this.data.highestUnlockedLevel || 1);
       });
 
       document.getElementById('btn-menu-garage').addEventListener('click', () => {
@@ -567,17 +598,24 @@
         this.openSettings();
       });
 
-      // Quick in-game buttons
+      // Quick in-game actions
+      document.getElementById('btn-quick-restart').addEventListener('click', () => this.restartCurrentLevel());
       document.getElementById('btn-camera').addEventListener('click', () => this.cycleCamera());
       document.getElementById('btn-lights').addEventListener('click', () => this.toggleLights());
       document.getElementById('btn-pause').addEventListener('click', () => this.togglePause());
       document.getElementById('btn-fullscreen').addEventListener('click', () => this.toggleFullscreen());
 
-      // Pause Menu Buttons
+      // Start Mission button from Briefing
+      document.getElementById('btn-start-mission').addEventListener('click', () => {
+        this.hideAllModals();
+        this.startLevelGameplay(this.currentLevelIndex);
+      });
+
+      // Pause menu
       document.getElementById('btn-pause-resume').addEventListener('click', () => this.togglePause());
       document.getElementById('btn-pause-restart').addEventListener('click', () => {
         this.hideAllModals();
-        this.startLevel(this.currentLevelIndex);
+        this.openMissionBriefing(this.currentLevelIndex);
       });
       document.getElementById('btn-pause-levels').addEventListener('click', () => {
         this.hideAllModals();
@@ -592,25 +630,25 @@
         this.openMainMenu();
       });
 
-      // Victory Buttons
+      // Victory actions
       document.getElementById('btn-vic-next').addEventListener('click', () => {
         this.hideAllModals();
         const next = Math.min(100, this.currentLevelIndex + 1);
-        this.startLevel(next);
+        this.openMissionBriefing(next);
       });
       document.getElementById('btn-vic-replay').addEventListener('click', () => {
         this.hideAllModals();
-        this.startLevel(this.currentLevelIndex);
+        this.openMissionBriefing(this.currentLevelIndex);
       });
       document.getElementById('btn-vic-garage').addEventListener('click', () => {
         this.hideAllModals();
         this.openGarage();
       });
 
-      // Fail Buttons
+      // Fail actions
       document.getElementById('btn-fail-retry').addEventListener('click', () => {
         this.hideAllModals();
-        this.startLevel(this.currentLevelIndex);
+        this.openMissionBriefing(this.currentLevelIndex);
       });
       document.getElementById('btn-fail-garage').addEventListener('click', () => {
         this.hideAllModals();
@@ -621,7 +659,7 @@
         this.openMainMenu();
       });
 
-      // Dialog Close Buttons
+      // Dialog close buttons
       document.getElementById('btn-close-levels').addEventListener('click', () => {
         this.hideAllModals();
         if (!this.isPlaying) this.openMainMenu();
@@ -667,7 +705,7 @@
     }
 
     updateMenuHUD() {
-      document.getElementById('menu-play-text').textContent = `PLAY LEVEL ${this.data.highestUnlockedLevel || 1}`;
+      document.getElementById('menu-play-text').textContent = `PLAY MISSION ${this.data.highestUnlockedLevel || 1}`;
       document.getElementById('menu-coin-count').textContent = this.data.coins;
       let totalStars = 0;
       Object.values(this.data.levelStars || {}).forEach((s) => { totalStars += (s || 0); });
@@ -703,7 +741,7 @@
         const endLvl = p * 20;
         const tabBtn = document.createElement('button');
         tabBtn.className = `page-tab-btn ${p === pageIndex ? 'active' : ''}`;
-        tabBtn.textContent = `Levels ${startLvl}-${endLvl}`;
+        tabBtn.textContent = `Missions ${startLvl}-${endLvl}`;
         tabBtn.addEventListener('click', () => this.renderLevelSelectPage(p));
         tabsWrap.appendChild(tabBtn);
       }
@@ -730,7 +768,7 @@
         }
 
         card.innerHTML = `
-          <div class="level-card-num">${isUnlocked ? `Level ${i}` : `🔒 ${i}`}</div>
+          <div class="level-card-num">${isUnlocked ? `Mission ${i}` : `🔒 ${i}`}</div>
           <div class="level-card-env">${envInfo ? envInfo.name.split(' ')[0] : 'Road'}</div>
           <div class="level-card-mission">${missionInfo ? missionInfo.icon + ' ' + missionInfo.name : 'Race'}</div>
           <div class="level-stars">${starsHTML}</div>
@@ -739,7 +777,7 @@
         if (isUnlocked) {
           card.addEventListener('click', () => {
             this.hideAllModals();
-            this.startLevel(i);
+            this.openMissionBriefing(i);
           });
         }
 
@@ -765,6 +803,11 @@
         this.sound.startEngine();
         document.getElementById('modal-pause').classList.remove('active');
       }
+    }
+
+    restartCurrentLevel() {
+      this.hideAllModals();
+      this.startLevelGameplay(this.currentLevelIndex);
     }
 
     toggleFullscreen() {
@@ -812,10 +855,6 @@
       const gDir = new THREE.DirectionalLight(0xfffaed, 1.4);
       gDir.position.set(4, 8, 4);
       this.garageScene.add(gDir);
-
-      const gRim = new THREE.DirectionalLight(0x00e5ff, 0.8);
-      gRim.position.set(-5, 4, -4);
-      this.garageScene.add(gRim);
 
       const platformGeo = new THREE.CylinderGeometry(2.4, 2.6, 0.2, 32);
       const platformMat = new THREE.MeshStandardMaterial({
@@ -951,7 +990,7 @@
         this.sound.playVictory();
         this.updateGarageView();
       } else {
-        alert('Not enough coins! Play adventure levels to earn more coins.');
+        alert('Not enough coins! Complete missions to earn more coins.');
       }
     }
 
@@ -983,7 +1022,7 @@
           center: new THREE.Vector3(0, 0, s),
           tangent: new THREE.Vector3(0, 0, 1),
           normal: new THREE.Vector3(0, 1, 0),
-          binormal: new THREE.Vector3(1, 0, 0),
+          right: new THREE.Vector3(1, 0, 0),
           yaw: 0,
           pitch: 0
         };
@@ -997,7 +1036,6 @@
       const p2 = this.trackWaypoints[Math.min(count - 1, idx + 1)];
       const p3 = this.trackWaypoints[Math.min(count - 1, idx + 2)];
 
-      // Standard Catmull-Rom Position P(t)
       const t2 = t * t;
       const t3 = t2 * t;
 
@@ -1005,15 +1043,13 @@
       const cy = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
       const cz = 0.5 * ((2 * p1.z) + (-p0.z + p2.z) * t + (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t2 + (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t3);
 
-      // Derivative P'(t) for exact forward tangent
       const dx = 0.5 * ((-p0.x + p2.x) + 2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t + 3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t2);
       const dy = 0.5 * ((-p0.y + p2.y) + 2 * (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t + 3 * (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t2);
       const dz = 0.5 * ((-p0.z + p2.z) + 2 * (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * t + 3 * (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * t2);
 
       const tangent = new THREE.Vector3(dx, dy, dz).normalize();
       const normal = new THREE.Vector3(0, 1, 0);
-      // Binormal points to the right side of the road
-      const binormal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const right = new THREE.Vector3(tangent.z, 0, -tangent.x).normalize();
 
       const yaw = Math.atan2(tangent.x, tangent.z);
       const pitch = Math.asin(Math.max(-1, Math.min(1, tangent.y)));
@@ -1022,16 +1058,41 @@
         center: new THREE.Vector3(cx, cy, cz),
         tangent: tangent,
         normal: normal,
-        binormal: binormal,
+        right: right,
         yaw: yaw,
         pitch: pitch
       };
     }
 
     // ------------------------------------------------------------------------
-    // LEVEL INITIALIZATION
+    // MISSION BRIEFING & GAME FLOW
     // ------------------------------------------------------------------------
-    startLevel(levelNum) {
+    openMissionBriefing(levelNum) {
+      this.currentLevelIndex = levelNum;
+      this.currentLevel = window.getLevel(levelNum);
+
+      this.hideAllModals();
+
+      document.getElementById('briefing-mission-num').textContent = `MISSION ${levelNum}`;
+      document.getElementById('briefing-mission-title').textContent = this.currentLevel.title.toUpperCase();
+
+      const mType = this.currentLevel.missionType;
+      let goalText = 'Drive through all checkpoints and reach the finish line.';
+      if (mType === 'passenger_pickup') {
+        goalText = 'Pick up the passenger at the yellow taxi zone and deliver them to the destination.';
+      } else if (mType === 'coin_collection') {
+        goalText = `Collect gold coins along the road and pass all checkpoints to reach the finish.`;
+      } else if (mType === 'mountain_race') {
+        goalText = 'Overtake rivals through alpine curves and finish in 1st position!';
+      } else if (mType === 'time_challenge') {
+        goalText = `Beat the speed clock (${this.currentLevel.timeLimit}s) and reach the destination.`;
+      }
+
+      document.getElementById('briefing-goal-text').textContent = goalText;
+      document.getElementById('modal-mission-briefing').classList.add('active');
+    }
+
+    startLevelGameplay(levelNum) {
       this.currentLevelIndex = levelNum;
       this.currentLevel = window.getLevel(levelNum);
 
@@ -1051,7 +1112,7 @@
       this.sunLight.intensity = envInfo.sunIntensity;
       this.sunLight.position.set(...envInfo.sunPos);
 
-      // Build 3D Highway & Road Geometry
+      // Build Road with Test Straight Section (0-140m) & Curved Sections
       this.buildRoadNetwork(this.currentLevel, envInfo);
 
       // Setup Player Car
@@ -1060,9 +1121,11 @@
       // Reset Player Dynamic State
       this.trackDist = 0;
       this.lateralOffset = 0; // Starts in Center Lane
+      this.lateralVel = 0;
+      this.relativeAngle = 0;
       this.speed = 0;
-      this.lateralSpeed = 0;
-      this.steerAngle = 0;
+      this.gear = 'D';
+      this.reverseHoldTime = 0;
       this.suspensionPitch = 0;
       this.suspensionRoll = 0;
       this.suspensionBounce = 0;
@@ -1074,14 +1137,17 @@
       this.racePosition = 1;
       this.physicsAccumulator = 0;
 
-      // Position camera initially
+      // Position camera initially directly behind car
       const initFrame = this.getTrackFrame(0);
-      this.camPos.copy(initFrame.center).addScaledVector(initFrame.tangent, -7).add(new THREE.Vector3(0, 3.5, 0));
-      this.camLookTarget.copy(initFrame.center).addScaledVector(initFrame.tangent, 15);
+      this.camPos.copy(initFrame.center).addScaledVector(initFrame.tangent, -7.0).add(new THREE.Vector3(0, 3.2, 0));
+      this.camLookTarget.copy(initFrame.center).addScaledVector(initFrame.tangent, 15.0);
       this.camera.position.copy(this.camPos);
       this.camera.lookAt(this.camLookTarget);
 
-      // Spawn Mission Entities, Smart Traffic & Obstacles
+      // Setup Checkpoints & Objectives
+      this.setupObjectives(this.currentLevel);
+
+      // Spawn World Entities
       this.spawnMissionEntities(this.currentLevel);
       this.spawnSmartTraffic(this.currentLevel);
       this.spawnObstacles(this.currentLevel);
@@ -1103,6 +1169,7 @@
       };
 
       removeList(this.trackMeshes);
+      removeList(this.checkpoints);
       removeList(this.coins);
       removeList(this.obstacles);
       removeList(this.trafficCars);
@@ -1133,6 +1200,140 @@
     }
 
     // ------------------------------------------------------------------------
+    // OBJECTIVES & VISIBLE 3D CHECKPOINTS
+    // ------------------------------------------------------------------------
+    setupObjectives(level) {
+      this.objectives = [];
+      this.currentObjectiveIndex = 0;
+      this.checkpoints = [];
+
+      const totalLen = level.roadLength;
+
+      // Define 3 sequential milestones
+      const cp1Dist = Math.round(totalLen * 0.32);
+      const cp2Dist = level.missionType === 'passenger_pickup'
+        ? level.passengerStopDist
+        : Math.round(totalLen * 0.68);
+      const finishDist = totalLen;
+
+      // Build 3D Holographic Checkpoint Arches & Vertical Light Beacons
+      const createCheckpointMesh = (dist, colorHex, label) => {
+        const frame = this.getTrackFrame(dist);
+        const group = new THREE.Group();
+        group.position.copy(frame.center);
+        group.rotation.y = frame.yaw;
+
+        // Glowing Arch Frame
+        const archMat = new THREE.MeshStandardMaterial({
+          color: colorHex,
+          emissive: colorHex,
+          emissiveIntensity: 0.8,
+          roughness: 0.2
+        });
+        const colGeo = new THREE.CylinderGeometry(0.2, 0.2, 5.5, 12);
+        [-6.0, 6.0].forEach((x) => {
+          const col = new THREE.Mesh(colGeo, archMat);
+          col.position.set(x, 2.75, 0);
+          group.add(col);
+        });
+
+        const crossbeam = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.4, 0.4), archMat);
+        crossbeam.position.set(0, 5.5, 0);
+        group.add(crossbeam);
+
+        // Rotating Holographic Diamond
+        const diamondGeo = new THREE.OctahedronGeometry(0.9, 0);
+        const diamondMat = new THREE.MeshBasicMaterial({ color: colorHex, wireframe: true });
+        const diamond = new THREE.Mesh(diamondGeo, diamondMat);
+        diamond.position.set(0, 3.2, 0);
+        group.add(diamond);
+
+        // Ground Target Ring
+        const ringGeo = new THREE.RingGeometry(1.6, 2.2, 24);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.set(0, 0.08, 0);
+        group.add(ring);
+
+        // Vertical Sky Light Beacon (Visible from afar!)
+        const beaconGeo = new THREE.CylinderGeometry(0.12, 0.12, 35, 8);
+        const beaconMat = new THREE.MeshBasicMaterial({
+          color: colorHex,
+          transparent: true,
+          opacity: 0.45
+        });
+        const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+        beacon.position.set(0, 17.5, 0);
+        group.add(beacon);
+
+        this.scene.add(group);
+
+        return {
+          group: group,
+          dist: dist,
+          diamond: diamond,
+          colorHex: colorHex,
+          label: label,
+          reached: false
+        };
+      };
+
+      const cp1 = createCheckpointMesh(cp1Dist, 0x00e5ff, 'Blue Checkpoint');
+      const cp2 = createCheckpointMesh(cp2Dist, level.missionType === 'passenger_pickup' ? 0xffeb3b : 0x34c759, level.missionType === 'passenger_pickup' ? 'Taxi Pickup Zone' : 'Green Checkpoint');
+
+      this.checkpoints.push(cp1, cp2);
+
+      // Sequential Objectives List
+      this.objectives = [
+        {
+          title: 'Drive to the blue checkpoint',
+          dist: cp1Dist,
+          progressText: '0 / 3 Complete',
+          cpRef: cp1
+        },
+        {
+          title: level.missionType === 'passenger_pickup'
+            ? 'Stop at Taxi Zone & Pick Up Passenger'
+            : 'Drive to the green checkpoint',
+          dist: cp2Dist,
+          progressText: '1 / 3 Complete',
+          cpRef: cp2
+        },
+        {
+          title: 'Reach the finish line',
+          dist: finishDist,
+          progressText: '2 / 3 Complete',
+          cpRef: null
+        }
+      ];
+
+      this.updateObjectiveUI();
+    }
+
+    triggerObjectiveComplete(nextDesc) {
+      this.sound.playCheckpointChime();
+      const toast = document.getElementById('hud-objective-toast');
+      const toastDesc = document.getElementById('toast-objective-desc');
+      if (toast && toastDesc) {
+        toastDesc.textContent = nextDesc || 'Drive to the next destination!';
+        toast.classList.add('active');
+        setTimeout(() => {
+          toast.classList.remove('active');
+        }, 2400);
+      }
+    }
+
+    updateObjectiveUI() {
+      const obj = this.objectives[this.currentObjectiveIndex];
+      if (!obj) return;
+
+      document.getElementById('hud-mission-badge').textContent = `MISSION ${this.currentLevelIndex}`;
+      document.getElementById('hud-mission-objective').textContent = obj.title;
+      document.getElementById('hud-mission-progress').textContent = obj.progressText;
+    }
+
+    // ------------------------------------------------------------------------
     // HIGHWAY GENERATION: Clean Road, Lanes, Curbs & Guardrails
     // ------------------------------------------------------------------------
     buildRoadNetwork(level, envInfo) {
@@ -1142,23 +1343,25 @@
       const step = this.trackStep;
       const count = Math.ceil(totalLen / step);
 
-      // Smooth curving path
       for (let i = 0; i <= count; i++) {
-        const progress = i / count;
-        // Balanced curve amplitude: natural highway curves
-        const curvePhase = progress * Math.PI * 4 * Math.min(0.6, level.curvatureScale);
-        const curveOffset = Math.sin(curvePhase) * (20 * level.curvatureScale) + Math.cos(progress * Math.PI * 2) * 8;
+        const dist = i * step;
+
+        // Straight test road for first 140m, then smooth curve transition
+        const curveBlend = Math.min(1.0, Math.max(0.0, (dist - 140) / 90));
+        const curvePhase = (dist - 140) * 0.016 * Math.min(0.7, level.curvatureScale);
+        const curveOffset = (Math.sin(curvePhase) * (24 * level.curvatureScale) + Math.sin(curvePhase * 0.5) * 10) * curveBlend;
 
         let hillY = 0;
         if (envInfo.isElevated) {
           hillY = 8;
         } else if (envInfo.isBridge) {
-          hillY = Math.sin(progress * Math.PI) * 10 + 6;
+          hillY = Math.sin((dist / totalLen) * Math.PI) * 10 + 6;
         } else {
-          hillY = Math.sin(progress * Math.PI * 3 * Math.min(0.6, level.hillScale)) * (5 * level.hillScale);
+          const hillBlend = Math.min(1.0, Math.max(0.0, (dist - 160) / 100));
+          hillY = Math.sin((dist / totalLen) * Math.PI * 3 * Math.min(0.6, level.hillScale)) * (5 * level.hillScale) * hillBlend;
         }
 
-        this.trackWaypoints.push(new THREE.Vector3(curveOffset, hillY, i * step));
+        this.trackWaypoints.push(new THREE.Vector3(curveOffset, hillY, dist));
       }
 
       const roadWidth = this.ROAD_WIDTH;
@@ -1175,12 +1378,12 @@
         const p2 = this.trackWaypoints[i + 1];
 
         const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
-        const side = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+        const rightVec = new THREE.Vector3(dir.z, 0, -dir.x).normalize();
 
-        const v1 = new THREE.Vector3().copy(p1).addScaledVector(side, -halfW);
-        const v2 = new THREE.Vector3().copy(p1).addScaledVector(side, halfW);
-        const v3 = new THREE.Vector3().copy(p2).addScaledVector(side, -halfW);
-        const v4 = new THREE.Vector3().copy(p2).addScaledVector(side, halfW);
+        const v1 = new THREE.Vector3().copy(p1).addScaledVector(rightVec, -halfW);
+        const v2 = new THREE.Vector3().copy(p1).addScaledVector(rightVec, halfW);
+        const v3 = new THREE.Vector3().copy(p2).addScaledVector(rightVec, -halfW);
+        const v4 = new THREE.Vector3().copy(p2).addScaledVector(rightVec, halfW);
 
         [v1, v2, v3, v2, v4, v3].forEach((v) => {
           pos.push(v.x, v.y + 0.04, v.z);
@@ -1194,7 +1397,7 @@
       roadGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
 
       const roadMat = new THREE.MeshStandardMaterial({
-        color: 0x1f2428,
+        color: 0x181c20,
         roughness: 0.8,
         metalness: 0.15
       });
@@ -1203,7 +1406,7 @@
       this.scene.add(roadMesh);
       this.trackMeshes.push(roadMesh);
 
-      // 2. Road Markings (Dashed Lane Dividers & Solid Edge Lines)
+      // 2. Clear Lane Divider Markings
       const whiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
       const yellowMat = new THREE.MeshBasicMaterial({ color: 0xffd600 });
 
@@ -1213,15 +1416,25 @@
         // Dashed lines between lanes at lateral offsets -2.15m and +2.15m
         [-2.15, 2.15].forEach((offset) => {
           const dash = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 4.2), whiteMat);
-          dash.position.copy(frame.center).addScaledVector(frame.binormal, offset);
+          dash.position.copy(frame.center).addScaledVector(frame.right, offset);
           dash.position.y += 0.08;
           dash.rotation.y = frame.yaw;
           this.scene.add(dash);
           this.trackMeshes.push(dash);
         });
+
+        // Double yellow center stripe
+        [-0.18, 0.18].forEach((offset) => {
+          const centerStripe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 5.0), yellowMat);
+          centerStripe.position.copy(frame.center).addScaledVector(frame.right, offset);
+          centerStripe.position.y += 0.08;
+          centerStripe.rotation.y = frame.yaw;
+          this.scene.add(centerStripe);
+          this.trackMeshes.push(centerStripe);
+        });
       }
 
-      // 3. 3D Steel Crash Barriers / Guardrails along both sides
+      // 3. 3D Steel Crash Barriers / Guardrails with Red & White Reflectors
       const railMat = new THREE.MeshStandardMaterial({
         color: 0xd6d8db,
         metalness: 0.7,
@@ -1235,28 +1448,25 @@
         const frame2 = this.getTrackFrame(s + 10);
 
         guardrailOffsets.forEach((sideOffset) => {
-          const pA = frame1.center.clone().addScaledVector(frame1.binormal, sideOffset);
-          const pB = frame2.center.clone().addScaledVector(frame2.binormal, sideOffset);
+          const pA = frame1.center.clone().addScaledVector(frame1.right, sideOffset);
+          const pB = frame2.center.clone().addScaledVector(frame2.right, sideOffset);
           pA.y += 0.55;
           pB.y += 0.55;
 
           const mid = new THREE.Vector3().addVectors(pA, pB).multiplyScalar(0.5);
           const dist = pA.distanceTo(pB);
 
-          // Horizontal Rail Beam
           const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.35, dist + 0.2), railMat);
           rail.position.copy(mid);
           rail.lookAt(pB);
           this.scene.add(rail);
           this.trackMeshes.push(rail);
 
-          // Vertical Support Post
           const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.75, 0.16), postMat);
           post.position.set(pA.x, pA.y - 0.25, pA.z);
           this.scene.add(post);
           this.trackMeshes.push(post);
 
-          // Red & White Reflector on post
           const reflector = new THREE.Mesh(
             new THREE.BoxGeometry(0.18, 0.1, 0.08),
             sideOffset < 0 ? yellowMat : whiteMat
@@ -1316,7 +1526,7 @@
       this.trackMeshes.push(gateGroup);
 
       // 6. Overhead Highway Signage Gantries every 180m
-      for (let s = 120; s < totalLen - 80; s += 180) {
+      for (let s = 140; s < totalLen - 80; s += 180) {
         const gFrame = this.getTrackFrame(s);
         const gantry = new THREE.Group();
         gantry.position.copy(gFrame.center);
@@ -1336,7 +1546,6 @@
         this.trackMeshes.push(gantry);
       }
 
-      // Spawn Roadside Props
       this.spawnEnvironmentProps(level, envInfo);
     }
 
@@ -1353,7 +1562,7 @@
 
         const propMesh = this.createPropMesh(propType);
         if (propMesh) {
-          propMesh.position.copy(frame.center).addScaledVector(frame.binormal, sideSign * distFromRoad);
+          propMesh.position.copy(frame.center).addScaledVector(frame.right, sideSign * distFromRoad);
           propMesh.position.y = frame.center.y;
           this.scene.add(propMesh);
           this.props.push(propMesh);
@@ -1419,7 +1628,6 @@
     // MISSIONS, COINS & INTERACTABLES
     // ------------------------------------------------------------------------
     spawnMissionEntities(level) {
-      // 1. Spinning Gold Coins
       const totalCoins = level.totalCoins;
       const coinGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.14, 14);
       coinGeo.rotateZ(Math.PI / 2);
@@ -1431,7 +1639,6 @@
         roughness: 0.2
       });
 
-      // 3 Lanes offsets: -3.4m, 0m, +3.4m
       const lanes = [-3.4, 0, 3.4];
       for (let i = 0; i < totalCoins; i++) {
         const s = 25 + i * (level.roadLength / totalCoins);
@@ -1439,7 +1646,7 @@
         const frame = this.getTrackFrame(s);
 
         const coin = new THREE.Mesh(coinGeo, coinMat);
-        coin.position.copy(frame.center).addScaledVector(frame.binormal, laneOffset);
+        coin.position.copy(frame.center).addScaledVector(frame.right, laneOffset);
         coin.position.y += 0.85;
         this.scene.add(coin);
 
@@ -1451,7 +1658,6 @@
         });
       }
 
-      // 2. Passenger Stop
       if (level.missionType === 'passenger_pickup') {
         const stopDist = level.passengerStopDist;
         const stopFrame = this.getTrackFrame(stopDist);
@@ -1459,20 +1665,19 @@
         const zoneGeo = new THREE.BoxGeometry(4.5, 0.08, 14);
         const zoneMat = new THREE.MeshBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.5 });
         this.passengerStopMesh = new THREE.Mesh(zoneGeo, zoneMat);
-        this.passengerStopMesh.position.copy(stopFrame.center).addScaledVector(stopFrame.binormal, 3.4);
+        this.passengerStopMesh.position.copy(stopFrame.center).addScaledVector(stopFrame.right, 3.4);
         this.passengerStopMesh.position.y += 0.06;
         this.passengerStopMesh.rotation.y = stopFrame.yaw;
         this.scene.add(this.passengerStopMesh);
         this.trackMeshes.push(this.passengerStopMesh);
 
         this.passengerObject = buildCartoonPassenger();
-        this.passengerObject.position.copy(stopFrame.center).addScaledVector(stopFrame.binormal, 5.2);
+        this.passengerObject.position.copy(stopFrame.center).addScaledVector(stopFrame.right, 5.2);
         this.passengerObject.position.y += 0.1;
         this.passengerObject.rotation.y = stopFrame.yaw - Math.PI / 2;
         this.scene.add(this.passengerObject);
       }
 
-      // 3. Rival Racers for Mountain Race
       if (level.missionType === 'mountain_race') {
         const rivalColors = ['#ff3b30', '#007aff', '#af52de'];
         const rivalLanes = [-3.4, 3.4, 0.0];
@@ -1495,10 +1700,6 @@
     // SMART MULTI-LANE TRAFFIC SYSTEM
     // ------------------------------------------------------------------------
     spawnSmartTraffic(level) {
-      // 3 Highway Lanes:
-      // Lane -3.4m: Oncoming traffic driving towards start (dir = -1)
-      // Lane 0.0m: Cruising traffic (dir = +1)
-      // Lane +3.4m: Overtaking traffic (dir = +1)
       const laneConfigs = [
         { offset: -3.4, dir: -1, baseSpeed: 14 },
         { offset: 0.0, dir: 1, baseSpeed: 16 },
@@ -1515,8 +1716,7 @@
         const trafficCar = window.buildCarModel(carConfig, color);
         this.scene.add(trafficCar.root);
 
-        // Safe initial distance: Starts at least 50m ahead of player
-        const dist = 55 + i * (level.roadLength / (totalVehicles + 1));
+        const dist = 70 + i * (level.roadLength / (totalVehicles + 1));
         const speed = laneCfg.baseSpeed + ((i % 3) - 1) * 2;
 
         this.trafficCars.push({
@@ -1530,7 +1730,6 @@
     }
 
     spawnObstacles(level) {
-      // Speed Breakers (bumps on road across lanes)
       for (let i = 0; i < level.speedBreakersCount; i++) {
         const dist = 70 + i * (level.roadLength / (level.speedBreakersCount + 1));
         const frame = this.getTrackFrame(dist);
@@ -1552,7 +1751,6 @@
         });
       }
 
-      // Potholes (textured road depressions)
       for (let i = 0; i < level.potholesCount; i++) {
         const dist = 95 + i * (level.roadLength / (level.potholesCount + 1));
         const laneOffset = ((i % 3) - 1) * 3.4;
@@ -1561,7 +1759,7 @@
         const holeGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.08, 14);
         const holeMat = new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.95 });
         const hole = new THREE.Mesh(holeGeo, holeMat);
-        hole.position.copy(frame.center).addScaledVector(frame.binormal, laneOffset);
+        hole.position.copy(frame.center).addScaledVector(frame.right, laneOffset);
         hole.position.y += 0.06;
         this.scene.add(hole);
 
@@ -1574,7 +1772,6 @@
         });
       }
 
-      // Rocks / Boulders
       for (let i = 0; i < level.rocksCount; i++) {
         const dist = 85 + i * (level.roadLength / (level.rocksCount + 1));
         const laneOffset = ((i % 3) - 1) * 3.4;
@@ -1583,7 +1780,7 @@
         const rockGeo = new THREE.DodecahedronGeometry(0.85);
         const rockMat = new THREE.MeshStandardMaterial({ color: 0x616161, roughness: 0.9 });
         const rock = new THREE.Mesh(rockGeo, rockMat);
-        rock.position.copy(frame.center).addScaledVector(frame.binormal, laneOffset);
+        rock.position.copy(frame.center).addScaledVector(frame.right, laneOffset);
         rock.position.y += 0.65;
         this.scene.add(rock);
 
@@ -1596,13 +1793,12 @@
         });
       }
 
-      // Crossing Animals
       for (let i = 0; i < level.animalsCount; i++) {
         const dist = 110 + i * (level.roadLength / (level.animalsCount + 1));
         const frame = this.getTrackFrame(dist);
         const animalMesh = this.buildCartoonAnimal(i % 2);
         const sideSign = i % 2 === 0 ? 1 : -1;
-        animalMesh.position.copy(frame.center).addScaledVector(frame.binormal, sideSign * 4.6);
+        animalMesh.position.copy(frame.center).addScaledVector(frame.right, sideSign * 4.6);
         this.scene.add(animalMesh);
 
         this.animatedAnimals.push({
@@ -1638,7 +1834,7 @@
     }
 
     // ------------------------------------------------------------------------
-    // FIXED-TIMESTEP PHYSICS UPDATE (Guarantees Frame-rate Independence)
+    // FIXED-TIMESTEP PHYSICS UPDATE (Guarantees Frame-rate Independence & Real Grip)
     // ------------------------------------------------------------------------
     physicsStep(dt) {
       this.input.update(dt);
@@ -1647,103 +1843,116 @@
       const topSpeed = isNitro ? this.playerMaxSpeed * this.playerNitroMult : this.playerMaxSpeed;
       const accelPower = isNitro ? this.playerAccel * 1.5 : this.playerAccel;
 
-      // Nitro consumption & recharge
       if (isNitro) {
         this.nitroLevel = Math.max(0, this.nitroLevel - dt * 26);
       } else {
         this.nitroLevel = Math.min(100, this.nitroLevel + dt * 7);
       }
 
-      // Forward / Reverse Acceleration Physics
+      // 1. Acceleration / Braking with Clear Forward & Reverse Separation
       if (this.input.gas) {
+        this.gear = 'D';
+        this.reverseHoldTime = 0;
         if (this.speed < 0) {
-          // Fast brake recovery out of reverse
-          this.speed += this.playerAccel * 3.0 * dt;
+          // Brake out of reverse quickly
+          this.speed += this.playerAccel * 3.2 * dt;
         } else {
-          // Smooth progressive acceleration tapering as it reaches top speed
+          // Smooth progressive acceleration
           const speedRatio = Math.min(1.0, this.speed / topSpeed);
           const currentTorque = accelPower * (1.0 - speedRatio * 0.75);
           this.speed = Math.min(topSpeed, this.speed + currentTorque * dt);
         }
       } else if (this.input.brake) {
-        if (this.speed > 0.4) {
-          // Strong progressive braking
-          this.speed = Math.max(0, this.speed - this.playerAccel * 2.4 * dt);
+        if (this.speed > 0.3) {
+          // Clean braking to complete stop
+          this.speed = Math.max(0, this.speed - this.playerAccel * 2.8 * dt);
+          this.reverseHoldTime = 0;
         } else {
-          // Smooth transition to reverse gear (cap at -9 m/s)
-          this.speed = Math.max(-9.0, this.speed - this.playerAccel * 0.8 * dt);
+          // When stopped, holding brake shifts to Reverse
+          this.reverseHoldTime += dt;
+          if (this.reverseHoldTime > 0.12) {
+            this.gear = 'R';
+            this.speed = Math.max(-7.0, this.speed - this.playerAccel * 0.8 * dt);
+          } else {
+            this.speed = 0;
+            this.gear = 'N';
+          }
         }
       } else {
+        this.reverseHoldTime = 0;
         // Natural rolling resistance and aerodynamic drag
         if (this.speed > 0) {
           const drag = 8.0 + (this.speed / topSpeed) * 4.0;
           this.speed = Math.max(0, this.speed - drag * dt);
+          this.gear = this.speed > 0.2 ? 'D' : 'N';
         } else if (this.speed < 0) {
           this.speed = Math.min(0, this.speed + 10.0 * dt);
+          this.gear = this.speed < -0.2 ? 'R' : 'N';
+        } else {
+          this.gear = 'N';
         }
       }
 
-      // Smooth Progressive Steering Angle
-      // In reverse, steering response inverts naturally like a real car
-      const steerDirection = this.speed >= 0 ? 1 : -1;
-      const targetSteerAngle = this.input.steerValue * 0.45 * steerDirection;
-      this.steerAngle += (targetSteerAngle - this.steerAngle) * Math.min(1.0, dt * 10.0);
+      // 2. Controlled Steering & Real Lateral Gripping (No Sliding Ice Feel!)
+      // Controlled lateral movement rate across lanes: 3.6 m/s
+      const speedGripFactor = Math.min(1.0, Math.abs(this.speed) / 5.0);
+      const driveDir = this.speed >= 0 ? 1.0 : -1.0;
+      const targetLateralVel = this.input.steerValue * 3.6 * speedGripFactor * driveDir;
 
-      // Lateral Velocity across the highway
-      const speedFactor = Math.min(1.0, Math.abs(this.speed) / 6.0);
-      const targetLateralSpeed = this.input.steerValue * this.playerHandling * 3.6 * speedFactor;
-      this.lateralSpeed += (targetLateralSpeed - this.lateralSpeed) * Math.min(1.0, dt * 12.0);
+      // Tight lateral damping
+      this.lateralVel += (targetLateralVel - this.lateralVel) * Math.min(1.0, dt * 10.0);
 
-      // Advance Player Position along Track Spline
+      // Advance along road track and across lanes
       this.trackDist += this.speed * dt;
-      this.lateralOffset += this.lateralSpeed * dt;
+      this.lateralOffset += this.lateralVel * dt;
 
-      // ----------------------------------------------------------------------
-      // PHYSICAL ROAD BOUNDARIES & GUARDRAIL COLLISION
-      // ----------------------------------------------------------------------
+      // 3. Visual Tilt Angle: Tilts naturally into turn with steering
+      const targetRelAngle = (this.lateralVel / 3.6) * 0.22;
+      this.relativeAngle += (targetRelAngle - this.relativeAngle) * Math.min(1.0, dt * 8.0);
+
+      // 4. Strict Road Boundaries & Curbs Collision
       if (this.lateralOffset > this.LATERAL_LIMIT) {
         this.lateralOffset = this.LATERAL_LIMIT;
-        this.lateralSpeed = -Math.abs(this.lateralSpeed) * 0.35; // Rebound off barrier
-        this.speed *= 0.88; // Friction scrape
+        this.lateralVel = -Math.abs(this.lateralVel) * 0.35;
+        this.speed *= 0.9;
         this.suspensionBounce = 0.25;
         this.sound.playBarrierScrape();
       } else if (this.lateralOffset < -this.LATERAL_LIMIT) {
         this.lateralOffset = -this.LATERAL_LIMIT;
-        this.lateralSpeed = Math.abs(this.lateralSpeed) * 0.35; // Rebound off barrier
-        this.speed *= 0.88;
+        this.lateralVel = Math.abs(this.lateralVel) * 0.35;
+        this.speed *= 0.9;
         this.suspensionBounce = 0.25;
         this.sound.playBarrierScrape();
       }
 
-      // Clamp track boundaries
       this.trackDist = Math.max(0, this.trackDist);
 
-      // Suspension Dynamic Simulation (Pitch & Roll)
-      const targetPitch = (this.input.gas ? -0.06 : 0) + (this.input.brake ? 0.12 : 0) + (isNitro ? -0.1 : 0);
-      const targetRoll = (this.lateralSpeed / 10.0) * 0.14;
+      // 5. Suspension Dynamics (Pitch on braking/gas, roll on steering)
+      const targetPitch = (this.input.gas ? -0.05 : 0) + (this.input.brake ? 0.1 : 0) + (isNitro ? -0.08 : 0);
+      const targetRoll = this.relativeAngle * 0.3;
       this.suspensionPitch += (targetPitch - this.suspensionPitch) * Math.min(1.0, dt * 10);
       this.suspensionRoll += (targetRoll - this.suspensionRoll) * Math.min(1.0, dt * 10);
       this.suspensionBounce = Math.max(0, this.suspensionBounce - dt * 3.5);
 
-      // Update 3D Car Model Position & Orientation
+      // 6. Update 3D Car Position & Orientation
       const frame = this.getTrackFrame(this.trackDist);
       if (this.carInstance) {
-        // Exact 3D world position on road surface
-        const carWorldPos = frame.center.clone().addScaledVector(frame.binormal, this.lateralOffset);
+        const carWorldPos = frame.center.clone().addScaledVector(frame.right, this.lateralOffset);
         carWorldPos.y += frame.normal.y * 0.05;
-
         this.carInstance.root.position.copy(carWorldPos);
-        // Face road heading + steering angle
-        this.carInstance.root.rotation.y = frame.yaw + this.steerAngle * 0.35;
 
-        // Apply chassis pitch, roll, and suspension bounce
+        // Visual Heading = Road Tangent + Visual Turn Angle
+        const carHeading = frame.yaw + this.relativeAngle;
+        this.carInstance.root.rotation.y = carHeading;
+
         this.carInstance.chassis.rotation.x = this.suspensionPitch;
         this.carInstance.chassis.rotation.z = -this.suspensionRoll;
         this.carInstance.chassis.position.y = Math.sin(this.suspensionBounce * Math.PI) * 0.2;
 
-        // Front wheels turn with steering
+        // Front wheels steering
+        const wheelAngle = this.input.steerValue * 0.42;
         this.carInstance.frontWheelPivots.forEach((p) => {
-          p.rotation.y = this.steerAngle * 0.8;
+          p.rotation.y = wheelAngle;
         });
 
         // Wheel Rotation with ground velocity
@@ -1766,17 +1975,19 @@
           }
         });
 
-        // Driver reactions inside cabin
+        // Driver reactions
         if (this.carInstance.driver) {
           const driverHead = this.carInstance.driver.head;
           const steeringWheel = this.carInstance.driver.steeringWheel;
 
-          // Head turns into corners
-          driverHead.rotation.y += (this.steerAngle * 0.7 - driverHead.rotation.y) * Math.min(1.0, dt * 14);
+          driverHead.rotation.y += (this.input.steerValue * 0.4 - driverHead.rotation.y) * Math.min(1.0, dt * 14);
           driverHead.rotation.x = this.suspensionPitch * 1.5;
-          steeringWheel.rotation.z = -this.steerAngle * 1.4;
+          steeringWheel.rotation.z = -this.input.steerValue * 1.4;
         }
       }
+
+      // Check Checkpoints & Objectives
+      this.checkCheckpointsAndObjectives(dt);
 
       // Check Collisions & Traffic
       this.checkCollisions(dt);
@@ -1796,12 +2007,42 @@
     }
 
     // ------------------------------------------------------------------------
+    // CHECKPOINTS & OBJECTIVE SEQUENCE CHECK
+    // ------------------------------------------------------------------------
+    checkCheckpointsAndObjectives(dt) {
+      // Rotate Checkpoint Diamonds
+      this.checkpoints.forEach((cp) => {
+        if (cp.diamond) cp.diamond.rotation.y += dt * 2.5;
+      });
+
+      const currentObj = this.objectives[this.currentObjectiveIndex];
+      if (!currentObj) return;
+
+      // Distance to active checkpoint
+      const distRemainingToObj = currentObj.dist - this.trackDist;
+
+      // Reached Checkpoint condition
+      if (distRemainingToObj <= 4.0 && distRemainingToObj >= -6.0) {
+        if (currentObj.cpRef && !currentObj.cpRef.reached) {
+          currentObj.cpRef.reached = true;
+          // Trigger milestone completion!
+          this.currentObjectiveIndex++;
+          const nextObj = this.objectives[this.currentObjectiveIndex];
+          if (nextObj) {
+            this.triggerObjectiveComplete(nextObj.title);
+            this.updateObjectiveUI();
+          }
+        }
+      }
+    }
+
+    // ------------------------------------------------------------------------
     // COLLISION DETECTION & MISSIONS
     // ------------------------------------------------------------------------
     checkCollisions(dt) {
       // 1. Coins Collection
       this.coins.forEach((c) => {
-        if (!c.collected && Math.abs(c.trackDist - this.trackDist) < 2.0) {
+        if (!c.collected && Math.abs(c.trackDist - this.trackDist) < 2.2) {
           if (Math.abs(c.lateralOffset - this.lateralOffset) < 1.8) {
             c.collected = true;
             c.mesh.visible = false;
@@ -1812,7 +2053,7 @@
         }
       });
 
-      // 2. Obstacles (Speed breakers, potholes, boulders)
+      // 2. Obstacles
       this.obstacles.forEach((obs) => {
         if (Math.abs(obs.trackDist - this.trackDist) < 1.6) {
           if (obs.type === 'speed_breaker') {
@@ -1831,7 +2072,7 @@
             if (Math.abs(obs.lateralOffset - this.lateralOffset) < 1.6) {
               this.takeDamage(18);
               this.speed *= -0.3;
-              obs.lateralOffset += 20; // Knock away
+              obs.lateralOffset += 20;
               obs.mesh.visible = false;
               this.sound.playCrash();
             }
@@ -1845,7 +2086,11 @@
         if (Math.abs(this.trackDist - stopDist) < 6.0) {
           if (Math.abs(this.speed) < 3.0) {
             this.passengerPickedUp = true;
-            this.sound.playVictory();
+            this.triggerObjectiveComplete('Passenger Onboard! Deliver to Destination');
+            if (this.currentObjectiveIndex === 1) {
+              this.currentObjectiveIndex++;
+              this.updateObjectiveUI();
+            }
             if (this.passengerObject && this.carInstance && this.carInstance.passengerSeat) {
               this.scene.remove(this.passengerObject);
               this.passengerObject.position.set(0, 0, 0);
@@ -1869,41 +2114,34 @@
     // SMART TRAFFIC & RIVALS UPDATE
     // ------------------------------------------------------------------------
     updateTrafficAndRivals(dt) {
-      // Traffic Vehicles
       this.trafficCars.forEach((t) => {
         t.dist += t.speed * t.dir * dt;
 
-        // Smooth recycling: If car is far behind, respawn ahead safely
         if (t.dir > 0 && t.dist < this.trackDist - 60) {
           t.dist = this.trackDist + 100 + Math.random() * 80;
         } else if (t.dir < 0 && t.dist < this.trackDist - 40) {
           t.dist = this.trackDist + 120 + Math.random() * 90;
         }
 
-        // Clamp inside track
         t.dist = Math.max(5, Math.min(this.trackLength - 10, t.dist));
 
         const tFrame = this.getTrackFrame(t.dist);
-        t.carData.root.position.copy(tFrame.center).addScaledVector(tFrame.binormal, t.lane);
+        t.carData.root.position.copy(tFrame.center).addScaledVector(tFrame.right, t.lane);
         t.carData.root.rotation.y = t.dir > 0 ? tFrame.yaw : tFrame.yaw + Math.PI;
 
-        // Wheels rotation
         const tWheelSpin = (t.speed / 0.42) * dt * t.dir;
         t.carData.wheels.forEach((w) => { w.mesh.rotation.x += tWheelSpin; });
 
-        // Accurate 3D collision check with player
         if (Math.abs(t.dist - this.trackDist) < 3.2) {
           if (Math.abs(t.lane - this.lateralOffset) < 1.9) {
-            // Deflect player laterally away
-            this.lateralSpeed = Math.sign(this.lateralOffset - t.lane) * 6.5;
-            this.speed *= 0.5;
+            this.lateralOffset += Math.sign(this.lateralOffset - t.lane) * 0.45;
+            this.speed *= 0.55;
             this.takeDamage(16);
             this.sound.playCrash();
           }
         }
       });
 
-      // Rivals in Mountain Race
       if (this.currentLevel.missionType === 'mountain_race') {
         let currentPos = 1;
         this.rivalCars.forEach((r) => {
@@ -1911,7 +2149,7 @@
           r.dist = Math.min(this.trackLength, r.dist);
 
           const rFrame = this.getTrackFrame(r.dist);
-          r.carData.root.position.copy(rFrame.center).addScaledVector(rFrame.binormal, r.lane);
+          r.carData.root.position.copy(rFrame.center).addScaledVector(rFrame.right, r.lane);
           r.carData.root.rotation.y = rFrame.yaw;
 
           const rWheelSpin = (r.speed / 0.42) * dt;
@@ -1924,7 +2162,6 @@
         this.racePosition = currentPos;
       }
 
-      // Animals Wiggle
       this.animatedAnimals.forEach((anim) => {
         const time = this.clock.getElapsedTime() + anim.timeOffset;
         anim.mesh.position.y = Math.abs(Math.sin(time * 5)) * 0.12;
@@ -1932,11 +2169,11 @@
     }
 
     // ------------------------------------------------------------------------
-    // SMOOTH CINEMATIC CAMERA (Zero-Jitter Spline Tracking)
+    // SMOOTH CHASE CAMERA (Centered & Stable)
     // ------------------------------------------------------------------------
     updateCamera(dt, isNitro) {
       const frame = this.getTrackFrame(this.trackDist);
-      const carPos = frame.center.clone().addScaledVector(frame.binormal, this.lateralOffset);
+      const carWorldPos = frame.center.clone().addScaledVector(frame.right, this.lateralOffset);
 
       if (this.cameraMode === 0) {
         // 3RD PERSON CHASE CAMERA
@@ -1947,24 +2184,22 @@
         const camDist = 6.4 + (Math.abs(this.speed) / this.playerMaxSpeed) * 1.5;
         const camHeight = 3.0;
 
-        // Position camera behind along road tangent, slightly following lateral position
-        const targetCamPos = carPos.clone()
+        // Position camera directly behind car along road tangent with subtle lateral offset
+        const targetCamPos = carWorldPos.clone()
           .addScaledVector(frame.tangent, -camDist)
           .add(new THREE.Vector3(0, camHeight, 0))
-          .addScaledVector(frame.binormal, this.lateralOffset * 0.2);
+          .addScaledVector(frame.right, this.lateralOffset * 0.25);
 
-        // Exponential smoothing (frame-rate independent)
-        const camSmooth = 1.0 - Math.exp(-12.0 * dt);
+        const camSmooth = 1.0 - Math.exp(-10.0 * dt);
         this.camPos.lerp(targetCamPos, camSmooth);
         this.camera.position.copy(this.camPos);
 
-        // Look-ahead target along road tangent
-        const lookAheadDist = 12.0 + (this.speed / this.playerMaxSpeed) * 10.0;
-        const targetLookAt = carPos.clone()
-          .addScaledVector(frame.tangent, lookAheadDist)
+        // Look at point ahead on the highway
+        const targetLookAt = carWorldPos.clone()
+          .addScaledVector(frame.tangent, 14.0)
           .add(new THREE.Vector3(0, 1.2, 0));
 
-        const lookSmooth = 1.0 - Math.exp(-15.0 * dt);
+        const lookSmooth = 1.0 - Math.exp(-12.0 * dt);
         this.camLookTarget.lerp(targetLookAt, lookSmooth);
         this.camera.lookAt(this.camLookTarget);
 
@@ -1973,9 +2208,9 @@
         this.camera.fov = 76;
         this.camera.updateProjectionMatrix();
 
-        const cockpitPos = carPos.clone()
+        const cockpitPos = carWorldPos.clone()
           .add(new THREE.Vector3(0, 1.2, 0))
-          .addScaledVector(frame.binormal, -0.35); // Driver seat
+          .addScaledVector(frame.right, -0.35);
 
         this.camera.position.copy(cockpitPos);
 
@@ -1987,20 +2222,22 @@
         this.camera.fov = 54;
         this.camera.updateProjectionMatrix();
 
-        const topPos = carPos.clone()
+        const topPos = carWorldPos.clone()
           .addScaledVector(frame.tangent, -8)
           .add(new THREE.Vector3(0, 24, 0));
 
         this.camera.position.copy(topPos);
-        this.camera.lookAt(carPos.clone().addScaledVector(frame.tangent, 12));
+        this.camera.lookAt(carWorldPos.clone().addScaledVector(frame.tangent, 12));
       }
     }
 
     // ------------------------------------------------------------------------
-    // HUD REFRESH
+    // HUD REFRESH & 3D WAYPOINT COMPASS
     // ------------------------------------------------------------------------
     updateHUD(speedKmH) {
       document.getElementById('hud-speed').textContent = speedKmH;
+      document.getElementById('hud-speed-gear').textContent = this.gear;
+
       document.getElementById('hud-nitro-val').textContent = `${Math.round(this.nitroLevel)}%`;
       document.getElementById('hud-nitro-fill').style.width = `${Math.round(this.nitroLevel)}%`;
       document.getElementById('hud-health-val').textContent = `${Math.round(this.health)}%`;
@@ -2017,32 +2254,26 @@
         timerEl.classList.remove('urgent');
       }
 
-      const progressRatio = Math.min(1.0, Math.max(0.0, this.trackDist / this.trackLength));
-      document.getElementById('hud-progress-fill').style.width = `${progressRatio * 100}%`;
-      document.getElementById('hud-progress-car').style.left = `${progressRatio * 100}%`;
-      const remMeters = Math.max(0, Math.round(this.trackLength - this.trackDist));
-      document.getElementById('hud-dist-remaining').textContent = `${remMeters}m`;
-      document.getElementById('hud-level-title').textContent = this.currentLevel.title.split(':')[0];
+      // Active Objective & Waypoint Arrow Pointer
+      const currentObj = this.objectives[this.currentObjectiveIndex];
+      if (currentObj) {
+        const distRemaining = Math.max(0, Math.round(currentObj.dist - this.trackDist));
+        document.getElementById('hud-mission-distance').textContent = `${distRemaining}m`;
+        document.getElementById('hud-waypoint-text').textContent = `${distRemaining}m`;
 
-      const missionType = this.currentLevel.missionType;
-      const missionTypeEl = document.getElementById('hud-mission-type');
-      const missionTextEl = document.getElementById('hud-mission-text');
-
-      if (missionType === 'coin_collection') {
-        missionTypeEl.textContent = '🪙 Coin Rush';
-        missionTextEl.textContent = `Collect: ${this.coinsCollectedThisRun} / ${this.currentLevel.targetCoins}`;
-      } else if (missionType === 'passenger_pickup') {
-        missionTypeEl.textContent = '🚕 Taxi Hero';
-        missionTextEl.textContent = this.passengerPickedUp ? 'Passenger Onboard! Deliver to Finish' : 'Stop at Passenger Zone Ahead!';
-      } else if (missionType === 'mountain_race') {
-        missionTypeEl.textContent = '🏁 Mountain Race';
-        missionTextEl.textContent = `Position: ${this.racePosition}${['st', 'nd', 'rd', 'th'][this.racePosition - 1] || 'th'} / ${this.currentLevel.rivalCount + 1}`;
-      } else if (missionType === 'time_challenge') {
-        missionTypeEl.textContent = '⏱️ Time Challenge';
-        missionTextEl.textContent = `Beat the Clock! (${Math.round(this.timeRemaining)}s)`;
-      } else {
-        missionTypeEl.textContent = '🚗 Adventure Cruise';
-        missionTextEl.textContent = `Finish Line: ${remMeters}m`;
+        const arrowEl = document.getElementById('hud-waypoint-arrow');
+        if (arrowEl && this.carInstance) {
+          const targetPos = currentObj.cpRef ? currentObj.cpRef.group.position : this.getTrackFrame(currentObj.dist).center;
+          const carPos = this.carInstance.root.position;
+          const dx = targetPos.x - carPos.x;
+          const dz = targetPos.z - carPos.z;
+          const worldAngle = Math.atan2(dx, dz);
+          let relAngle = worldAngle - this.carInstance.root.rotation.y;
+          while (relAngle > Math.PI) relAngle -= Math.PI * 2;
+          while (relAngle < -Math.PI) relAngle += Math.PI * 2;
+          const deg = Math.round(relAngle * 180 / Math.PI);
+          arrowEl.style.transform = `rotate(${deg}deg)`;
+        }
       }
     }
 
@@ -2104,12 +2335,6 @@
       document.getElementById('fail-reason').textContent = reason === 'Car Wrecked!' ? 'Your car suffered critical collision damage.' : 'Time ran out before reaching the destination.';
     }
 
-    respawnCar() {
-      this.speed = 0;
-      this.lateralOffset = 0;
-      this.health = Math.min(100, this.health + 25);
-    }
-
     // ------------------------------------------------------------------------
     // MAIN ANIMATION LOOP
     // ------------------------------------------------------------------------
@@ -2118,7 +2343,6 @@
       const rawDelta = Math.min(0.08, this.clock.getDelta());
 
       if (this.isPlaying && !this.isPaused) {
-        // Fixed-timestep physics simulation loop
         this.physicsAccumulator += rawDelta;
         let steps = 0;
         while (this.physicsAccumulator >= this.FIXED_DT && steps < 5) {
@@ -2127,7 +2351,6 @@
           steps++;
         }
 
-        // Camera and sound update
         const isNitro = this.input.nitro && this.nitroLevel > 5;
         this.updateCamera(rawDelta, isNitro);
 
@@ -2138,7 +2361,6 @@
         this.renderer.render(this.scene, this.camera);
       }
 
-      // Garage turntable preview animation
       const garageModal = document.getElementById('modal-garage');
       if (garageModal && garageModal.classList.contains('active')) {
         if (this.garageCarGroup) {
@@ -2151,7 +2373,6 @@
     }
   }
 
-  // Initialize on page load
   window.addEventListener('DOMContentLoaded', () => {
     new CarAdventureGame();
   });

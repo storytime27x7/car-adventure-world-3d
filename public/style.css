@@ -202,105 +202,115 @@ html, body {
   font-size: 14px;
 }
 
-.hud-objective-wrap {
+/* Left: Mission & Objective Card */
+.hud-mission-card {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid var(--primary-gold);
+  border-radius: var(--border-radius-md);
+  padding: 6px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 280px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 12px rgba(255, 204, 0, 0.25);
+}
+
+.hud-mission-badge {
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: var(--primary-gold);
+  letter-spacing: 1px;
+}
+
+.hud-mission-objective-text {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.hud-mission-subinfo {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary-cyan);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hud-subinfo-dot {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Center Cluster: 3D Waypoint Arrow & Speedometer */
+.hud-center-cluster {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
-  border: 1.5px solid var(--primary-gold);
-  border-radius: var(--border-radius-md);
-  padding: 6px 18px;
-  box-shadow: 0 0 16px rgba(255, 204, 0, 0.25);
+  gap: 6px;
+  pointer-events: none;
 }
 
-.hud-objective-title {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: var(--primary-gold);
-}
-
-.hud-objective-val {
-  font-size: 15px;
-  font-weight: 800;
-  color: #fff;
-}
-
-.hud-stats-group {
+.hud-waypoint-pointer-wrap {
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--primary-cyan);
+  border-radius: 20px;
+  padding: 4px 14px;
   display: flex;
   align-items: center;
   gap: 8px;
+  box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
 }
 
-.hud-coin-count {
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--primary-gold);
+.hud-waypoint-arrow {
+  font-size: 18px;
+  color: var(--primary-cyan);
+  display: inline-block;
+  transform-origin: center center;
+  transition: transform 0.15s ease-out;
+  text-shadow: 0 0 8px var(--primary-cyan);
 }
 
-.hud-timer-count {
-  font-size: 17px;
+.hud-waypoint-text {
+  font-size: 11px;
   font-weight: 800;
+  color: #fff;
   letter-spacing: 0.5px;
-  color: #fff;
 }
 
-.hud-timer-count.urgent {
-  color: var(--primary-red);
-  animation: pulseTimer 0.6s infinite alternate;
-}
-
-@keyframes pulseTimer {
-  from { transform: scale(1); }
-  to { transform: scale(1.15); }
-}
-
-.hud-icon-btn {
-  background: var(--dark-card);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--border-radius-md);
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  color: #fff;
-  cursor: pointer;
-  transition: transform 0.1s, background 0.15s;
-  pointer-events: auto;
-}
-
-.hud-icon-btn:active {
-  transform: scale(0.92);
-  background: rgba(255, 255, 255, 0.2);
-}
-
-/* Speedometer & Gauges (Top Center / Unobtrusive, Keeps Road View Clear) */
+/* Speedometer & Gauges */
 .hud-speedo-panel {
-  position: absolute;
-  top: 68px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15, 23, 42, 0.75);
+  background: rgba(15, 23, 42, 0.85);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 16px;
-  padding: 4px 18px;
+  padding: 4px 16px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  pointer-events: none;
+  gap: 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+
+.hud-speed-gear {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--primary-gold);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 204, 0, 0.4);
 }
 
 .speed-digital-wrap {
   text-align: center;
-  min-width: 55px;
+  min-width: 50px;
 }
 
 .speed-value {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 900;
   line-height: 1;
   color: #fff;
@@ -318,8 +328,8 @@ html, body {
 .gauges-col {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  width: 95px;
+  gap: 4px;
+  width: 90px;
 }
 
 .gauge-row {
@@ -358,6 +368,173 @@ html, body {
   background: linear-gradient(90deg, #11998e, #38ef7d);
   border-radius: 3px;
   transition: width 0.1s linear;
+}
+
+/* Objective Complete Pop Toast Notification */
+.objective-toast {
+  position: absolute;
+  top: 100px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.95), rgba(16, 185, 129, 0.95));
+  border: 2px solid #86efac;
+  border-radius: 20px;
+  padding: 10px 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 20px rgba(34, 197, 94, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+  z-index: 120;
+}
+
+.objective-toast.active {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.toast-check {
+  font-size: 24px;
+  font-weight: 900;
+  background: #fff;
+  color: #16a34a;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toast-title {
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+
+.toast-desc {
+  font-size: 12px;
+  opacity: 0.95;
+}
+
+/* -------------------------------------------------------------------------
+   MISSION BRIEFING MODAL
+   ------------------------------------------------------------------------- */
+.briefing-card {
+  background: radial-gradient(circle at center, #1e293b, #0f172a);
+  border: 2px solid var(--primary-gold);
+  border-radius: 24px;
+  padding: 24px 32px;
+  max-width: 580px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(255, 204, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: popIn 0.3s ease-out;
+}
+
+.briefing-badge {
+  display: inline-block;
+  align-self: center;
+  background: var(--primary-gold);
+  color: #000;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 4px 14px;
+  border-radius: 12px;
+  letter-spacing: 1px;
+}
+
+.briefing-title {
+  font-size: 24px;
+  font-weight: 900;
+  color: #fff;
+  margin-top: -4px;
+}
+
+.briefing-goal-box {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 204, 0, 0.4);
+  border-radius: 12px;
+  padding: 10px 16px;
+}
+
+.briefing-goal-label {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--primary-gold);
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+
+.briefing-goal-text {
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.controls-guide-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  text-align: left;
+}
+
+.controls-col {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.controls-col-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--primary-cyan);
+  margin-bottom: 2px;
+}
+
+.control-key-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted-text);
+}
+
+.control-key-row kbd {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 800;
+}
+
+.briefing-hint {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--primary-gold);
+}
+
+.btn-start-mission-pulse {
+  align-self: center;
+  padding: 12px 32px;
+  font-size: 18px;
+  animation: pulseButton 1.5s infinite;
+}
+
+@keyframes pulseButton {
+  0% { transform: scale(1); box-shadow: 0 4px 16px rgba(255, 204, 0, 0.4); }
+  50% { transform: scale(1.04); box-shadow: 0 6px 24px rgba(255, 204, 0, 0.7); }
+  100% { transform: scale(1); box-shadow: 0 4px 16px rgba(255, 204, 0, 0.4); }
 }
 
 /* -------------------------------------------------------------------------
