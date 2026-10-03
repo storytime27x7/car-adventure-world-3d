@@ -177,6 +177,24 @@ window.ENVIRONMENTS = {
     sunPos: [40, 100, 60],
     props: ['redwood_tree', 'giant_mushroom', 'fallen_log', 'mossy_rock'],
     description: 'Dense ancient redwood groves with dappled sunlight filtering through green canopies.'
+  },
+  night_city: {
+    id: 'night_city',
+    name: 'Neon Cyber Metropolis',
+    skyColor: 0x050814,
+    fogColor: 0x0b132b,
+    fogDensity: 0.0035,
+    groundColor: 0x0a101f,
+    roadColor: 0x111625,
+    curbColor: 0x00f0ff,
+    ambientLight: 0x243b6b,
+    ambientIntensity: 0.55,
+    sunLight: 0x4cc9f0,
+    sunIntensity: 0.65,
+    sunPos: [40, 80, 50],
+    isNight: true,
+    props: ['neon_skyscraper', 'neon_billboard', 'cyber_lamp', 'traffic_gantry'],
+    description: 'Electrifying nocturnal skyline ablaze with holographic neon signs, streetlights, and headlights.'
   }
 };
 
@@ -222,7 +240,20 @@ window.MISSION_TYPES = {
 // ----------------------------------------------------------------------------
 // 100 LEVEL PROCEDURAL GENERATION
 // ----------------------------------------------------------------------------
-const envKeys = Object.keys(window.ENVIRONMENTS);
+const PRIMARY_ENV_ORDER = [
+  'city',       // Level 1: Modern City / Highway
+  'village',    // Level 2: Village / Countryside
+  'bridge',     // Level 3: River / Bridge
+  'mountains',  // Level 4: Mountain & Tunnel
+  'desert',     // Level 5: Desert Dunes Highway
+  'forest',     // Level 6: Dense Forest
+  'night_city'  // Level 7: Night City
+];
+
+const EXTENDED_ENV_LIST = [
+  'city', 'village', 'bridge', 'mountains', 'desert', 'forest', 'night_city', 'snow', 'flyover', 'tunnel'
+];
+
 const missionKeys = Object.keys(window.MISSION_TYPES);
 
 // Seeded pseudo-random generator for 100% reproducible levels
@@ -235,11 +266,21 @@ function createSeededRandom(seed) {
   };
 }
 
+const LEVEL_CONFIG_PRESETS = [
+  { title: 'Metro City Highway', env: 'city', mission: 'coin_collection', destination: 'Downtown Central Plaza' },
+  { title: 'Sunny Countryside Tour', env: 'village', mission: 'passenger_pickup', destination: 'Greenfield Windmill Farm' },
+  { title: 'Grand River Skybridge', env: 'bridge', mission: 'bridge_crossing', destination: 'Riverside Harbor Outpost' },
+  { title: 'Alpine Peak & Tunnel', env: 'mountains', mission: 'mountain_race', destination: 'Eagle Mountain Summit' },
+  { title: 'Canyon Dune Highway', env: 'desert', mission: 'time_challenge', destination: 'Canyon Oasis Outpost' },
+  { title: 'Redwood Forest Trail', env: 'forest', mission: 'coin_collection', destination: 'Deep Timber Ranger Station' },
+  { title: 'Cyber Neon Boulevard', env: 'night_city', mission: 'time_challenge', destination: 'Neon Plaza Terminal' }
+];
+
 const LEVEL_TITLES = [
-  'City Awakening', 'Meadow Morning', 'Alpine First Steps', 'River Breeze',
-  'Skyline Highway', 'High Suspension', 'Cavern Passage', 'Frosty Foothills',
-  'Red Sand Cruise', 'Redwood Trails', 'Downtown Rush', 'Windmill Ridge',
-  'Cliffhanger Curves', 'Waterfront Run', 'Golden Overpass', 'Echo Depths',
+  'Metro City Highway', 'Sunny Countryside Tour', 'Grand River Skybridge', 'Alpine Peak & Tunnel',
+  'Canyon Dune Highway', 'Redwood Forest Trail', 'Cyber Neon Boulevard', 'Frosty Foothills Run',
+  'Red Sand Dunes Cruise', 'Deep Woodland Trails', 'Downtown High Express', 'Windmill Ridge Crossing',
+  'Cliffhanger Curves', 'Waterfront Pier Run', 'Golden Overpass', 'Echo Depths Tunnel',
   'Glacier Drift', 'Canyon Crossing', 'Canopy Sprint', 'Metro Expressway',
   'Orchard Valley', 'Mountain Slopes', 'Rapid Waters', 'High Bridge Rush',
   'Tunnel of Lights', 'Snowy Serpentines', 'Dune Runner', 'Deep Timber',
@@ -268,15 +309,26 @@ window.LEVELS = [];
 for (let i = 1; i <= 100; i++) {
   const rng = createSeededRandom(i * 997 + 1337);
 
-  // Cycle through environments and mission types systematically
-  const envIndex = (i - 1) % envKeys.length;
-  const envKey = envKeys[envIndex];
+  // Exact environments for Levels 1-7, then cycling
+  let envKey;
+  let missionKey;
+  let customTitle;
+  let destinationName;
 
-  // Specific missions mapping
-  let missionKey = missionKeys[(i - 1) % missionKeys.length];
-  // If bridge env, high chance of bridge_crossing
-  if (envKey === 'bridge' && i % 2 === 0) missionKey = 'bridge_crossing';
-  if (envKey === 'mountains' && i % 3 === 0) missionKey = 'mountain_race';
+  if (i <= 7) {
+    const preset = LEVEL_CONFIG_PRESETS[i - 1];
+    envKey = preset.env;
+    missionKey = preset.mission;
+    customTitle = preset.title;
+    destinationName = preset.destination;
+  } else {
+    envKey = EXTENDED_ENV_LIST[(i - 1) % EXTENDED_ENV_LIST.length];
+    missionKey = missionKeys[(i - 1) % missionKeys.length];
+    if (envKey === 'bridge' && i % 2 === 0) missionKey = 'bridge_crossing';
+    if (envKey === 'mountains' && i % 3 === 0) missionKey = 'mountain_race';
+    customTitle = LEVEL_TITLES[i - 1] || 'Grand Adventure';
+    destinationName = `${window.ENVIRONMENTS[envKey].name.split(' ')[0]} Terminal`;
+  }
 
   // Long tracks: length scales progressively from 500m to 1600m
   const baseLength = 500 + Math.floor((i / 100) * 900) + Math.floor(rng() * 200);
@@ -321,7 +373,8 @@ for (let i = 1; i <= 100; i++) {
 
   const levelObj = {
     levelNumber: i,
-    title: `Level ${i}: ${LEVEL_TITLES[i - 1] || 'Great Adventure'}`,
+    title: `Level ${i}: ${customTitle}`,
+    destinationName: destinationName,
     environment: envKey,
     missionType: missionKey,
     roadLength: roadLength,

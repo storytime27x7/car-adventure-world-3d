@@ -421,6 +421,133 @@ html, body {
 }
 
 /* -------------------------------------------------------------------------
+   REAL-TIME GPS TARGET MINIMAP (HEADING-UP RADAR)
+   ------------------------------------------------------------------------- */
+.hud-minimap-wrap {
+  position: absolute;
+  top: 72px;
+  left: 18px;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.minimap-bezel {
+  position: relative;
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  background: rgba(10, 16, 30, 0.88);
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(0, 229, 255, 0.75);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7), 0 0 14px rgba(0, 229, 255, 0.25);
+  overflow: hidden;
+}
+
+#hud-minimap-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.minimap-compass-n {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 900;
+  color: #ff3b30;
+  text-shadow: 0 0 4px #000;
+  pointer-events: none;
+  letter-spacing: 0.5px;
+}
+
+.minimap-label {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 7.5px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+
+.minimap-target-badge {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--primary-cyan);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #00e5ff;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+/* -------------------------------------------------------------------------
+   MISSION START INTRO BANNER
+   ------------------------------------------------------------------------- */
+.mission-start-banner {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.75);
+  background: radial-gradient(circle at center, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98));
+  border: 2px solid var(--primary-gold);
+  border-radius: 20px;
+  padding: 16px 36px;
+  text-align: center;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.85), 0 0 24px rgba(255, 204, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.35s ease;
+  z-index: 200;
+}
+
+.mission-start-banner.active {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+.banner-sub {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: var(--primary-cyan);
+  text-transform: uppercase;
+}
+
+.banner-title {
+  font-size: 22px;
+  font-weight: 900;
+  color: #fff;
+  margin: 3px 0;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+
+.banner-dest {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--primary-gold);
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+
+.banner-go {
+  font-size: 26px;
+  font-weight: 900;
+  color: #00ff88;
+  letter-spacing: 2px;
+  text-shadow: 0 0 12px rgba(0, 255, 136, 0.6);
+}
+
+/* -------------------------------------------------------------------------
    MISSION BRIEFING MODAL
    ------------------------------------------------------------------------- */
 .briefing-card {

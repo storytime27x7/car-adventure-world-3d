@@ -196,6 +196,42 @@
         });
       } catch (e) {}
     }
+
+    playTireScreech() {
+      if (!this.ctx || this.sfxVol <= 0) return;
+      try {
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(750 + Math.random() * 250, now);
+        osc.frequency.exponentialRampToValueAtTime(320, now + 0.2);
+        gain.gain.setValueAtTime(0.18 * this.sfxVol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.21);
+      } catch (e) {}
+    }
+
+    playBoost() {
+      if (!this.ctx || this.sfxVol <= 0) return;
+      try {
+        const now = this.ctx.currentTime;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(660, now + 0.35);
+        gain.gain.setValueAtTime(0.25 * this.sfxVol, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.36);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.37);
+      } catch (e) {}
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -506,6 +542,15 @@
       this.passengerObject = null;
       this.passengerStopMesh = null;
 
+      // Minimap Context & World Effects
+      this.minimapCanvas = null;
+      this.minimapCtx = null;
+      this.animatedPedestrians = [];
+      this.animatedWaterMeshes = [];
+      this.animatedWindmills = [];
+      this.ambientParticles = [];
+      this.camShake = 0;
+
       // Garage Turntable Scene
       this.garageScene = null;
       this.garageCamera = null;
@@ -578,6 +623,11 @@
     // UI BINDINGS & SCREEN MANAGEMENT
     // ------------------------------------------------------------------------
     initUI() {
+      this.minimapCanvas = document.getElementById('hud-minimap-canvas');
+      if (this.minimapCanvas) {
+        this.minimapCtx = this.minimapCanvas.getContext('2d');
+      }
+
       document.getElementById('btn-menu-play').addEventListener('click', () => {
         this.sound.init();
         this.openMissionBriefing(this.data.highestUnlockedLevel || 1);
@@ -1099,6 +1149,19 @@
       this.hideAllModals();
       document.getElementById('hud-overlay').classList.add('active');
 
+      // Mission Start Intro Announcement
+      const banner = document.getElementById('hud-mission-start-banner');
+      if (banner) {
+        const destTitle = this.currentLevel.destinationName || 'Destination Terminal';
+        document.getElementById('banner-mission-type').textContent = `MISSION ${levelNum}`;
+        document.getElementById('banner-mission-title').textContent = this.currentLevel.title.toUpperCase();
+        document.getElementById('banner-mission-dest').textContent = `TARGET: ${destTitle.toUpperCase()}`;
+        banner.classList.add('active');
+        setTimeout(() => {
+          banner.classList.remove('active');
+        }, 2200);
+      }
+
       this.clearTrackEntities();
 
       const envInfo = window.ENVIRONMENTS[this.currentLevel.environment] || window.ENVIRONMENTS.city;
@@ -1177,6 +1240,17 @@
       removeList(this.animatedAnimals);
       removeList(this.props);
 
+      this.animatedPedestrians.forEach((p) => {
+        if (p.root && p.root.parent) p.root.parent.remove(p.root);
+      });
+      this.animatedPedestrians.length = 0;
+      this.animatedWaterMeshes.length = 0;
+      this.animatedWindmills.length = 0;
+      this.ambientParticles.forEach((pt) => {
+        if (pt.parent) pt.parent.remove(pt);
+      });
+      this.ambientParticles.length = 0;
+
       if (this.carInstance && this.carInstance.root) {
         this.scene.remove(this.carInstance.root);
         this.carInstance = null;
@@ -1197,6 +1271,11 @@
 
       this.carInstance = window.buildCarModel(config, paintColor);
       this.scene.add(this.carInstance.root);
+
+      const envInfo = window.ENVIRONMENTS[this.currentLevel.environment] || window.ENVIRONMENTS.city;
+      if (envInfo.isNight && this.carInstance.headlights) {
+        this.carInstance.headlights.forEach((l) => { l.visible = true; });
+      }
     }
 
     // ------------------------------------------------------------------------
@@ -1267,6 +1346,15 @@
         beacon.position.set(0, 17.5, 0);
         group.add(beacon);
 
+        // Animated Race Marshal Flag Waver beside Checkpoint
+        if (typeof window.buildCartoonPedestrian === 'function') {
+          const marshal = window.buildCartoonPedestrian('checkpoint');
+          marshal.root.position.set(6.8, 0, 0);
+          marshal.root.rotation.y = -Math.PI / 2;
+          group.add(marshal.root);
+          this.animatedPedestrians.push(marshal);
+        }
+
         this.scene.add(group);
 
         return {
@@ -1284,24 +1372,60 @@
 
       this.checkpoints.push(cp1, cp2);
 
+      // Destination & Environment Themed Objectives
+      const destName = level.destinationName || 'Destination Terminal';
+      let obj1Title = 'Drive to the blue checkpoint';
+      let obj2Title = 'Drive to the green checkpoint';
+      let obj3Title = `Reach ${destName}`;
+
+      if (level.environment === 'city') {
+        obj1Title = 'Navigate city highway to blue checkpoint';
+        obj2Title = 'Drive through downtown traffic to green checkpoint';
+        obj3Title = `Arrive safely at ${destName}`;
+      } else if (level.environment === 'village') {
+        obj1Title = 'Drive along the countryside road to blue checkpoint';
+        obj2Title = level.missionType === 'passenger_pickup'
+          ? 'Stop at Taxi Stop & Pick Up Farmer'
+          : 'Pass the Windmill Ridge to green checkpoint';
+        obj3Title = `Deliver cargo to ${destName}`;
+      } else if (level.environment === 'bridge') {
+        obj1Title = 'Approach the Grand River Bridge Entrance';
+        obj2Title = 'Cross the Suspension Skyway over the river';
+        obj3Title = `Reach ${destName}`;
+      } else if (level.environment === 'mountains') {
+        obj1Title = 'Navigate mountain pass curves to blue checkpoint';
+        obj2Title = 'Drive through Echo Mountain Tunnel';
+        obj3Title = `Reach ${destName} Summit`;
+      } else if (level.environment === 'desert') {
+        obj1Title = 'Speed across desert highway to blue checkpoint';
+        obj2Title = 'Avoid canyon rocks to green checkpoint';
+        obj3Title = `Arrive at ${destName}`;
+      } else if (level.environment === 'forest') {
+        obj1Title = 'Follow redwood forest trail to blue checkpoint';
+        obj2Title = 'Drive past misty groves to green checkpoint';
+        obj3Title = `Reach ${destName}`;
+      } else if (level.environment === 'night_city') {
+        obj1Title = 'Race under neon lights to blue checkpoint';
+        obj2Title = 'Weave through night traffic to green checkpoint';
+        obj3Title = `Reach ${destName}`;
+      }
+
       // Sequential Objectives List
       this.objectives = [
         {
-          title: 'Drive to the blue checkpoint',
+          title: obj1Title,
           dist: cp1Dist,
           progressText: '0 / 3 Complete',
           cpRef: cp1
         },
         {
-          title: level.missionType === 'passenger_pickup'
-            ? 'Stop at Taxi Zone & Pick Up Passenger'
-            : 'Drive to the green checkpoint',
+          title: obj2Title,
           dist: cp2Dist,
           progressText: '1 / 3 Complete',
           cpRef: cp2
         },
         {
-          title: 'Reach the finish line',
+          title: obj3Title,
           dist: finishDist,
           progressText: '2 / 3 Complete',
           cpRef: null
@@ -1434,13 +1558,23 @@
         });
       }
 
-      // 3. 3D Steel Crash Barriers / Guardrails with Red & White Reflectors
-      const railMat = new THREE.MeshStandardMaterial({
-        color: 0xd6d8db,
-        metalness: 0.7,
-        roughness: 0.3
-      });
-      const postMat = new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.6 });
+      // 3. Environment-Specific Guardrails / Barriers
+      let railMat = new THREE.MeshStandardMaterial({ color: 0xd6d8db, metalness: 0.7, roughness: 0.3 });
+      let postMat = new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.6 });
+
+      if (envInfo.id === 'village') {
+        railMat = new THREE.MeshStandardMaterial({ color: 0x6d4c41, roughness: 0.85 });
+        postMat = new THREE.MeshStandardMaterial({ color: 0x4e342e, roughness: 0.9 });
+      } else if (envInfo.id === 'bridge' || envInfo.isBridge) {
+        railMat = new THREE.MeshStandardMaterial({ color: 0xd32f2f, roughness: 0.35, metalness: 0.4 });
+        postMat = new THREE.MeshStandardMaterial({ color: 0xb71c1c, roughness: 0.4 });
+      } else if (envInfo.id === 'night_city') {
+        railMat = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x00f0ff, emissiveIntensity: 0.8 });
+        postMat = new THREE.MeshStandardMaterial({ color: 0x111625 });
+      } else if (envInfo.id === 'mountains') {
+        railMat = new THREE.MeshStandardMaterial({ color: 0x90a4ae, roughness: 0.7 });
+        postMat = new THREE.MeshStandardMaterial({ color: 0x546e7a, roughness: 0.8 });
+      }
 
       const guardrailOffsets = [-halfW + 0.3, halfW - 0.3];
       for (let s = 5; s < totalLen - 5; s += 10) {
@@ -1467,17 +1601,35 @@
           this.scene.add(post);
           this.trackMeshes.push(post);
 
-          const reflector = new THREE.Mesh(
-            new THREE.BoxGeometry(0.18, 0.1, 0.08),
-            sideOffset < 0 ? yellowMat : whiteMat
-          );
-          reflector.position.set(pA.x, pA.y + 0.05, pA.z);
-          this.scene.add(reflector);
-          this.trackMeshes.push(reflector);
+          if (envInfo.id !== 'night_city' && envInfo.id !== 'village') {
+            const reflector = new THREE.Mesh(
+              new THREE.BoxGeometry(0.18, 0.1, 0.08),
+              sideOffset < 0 ? yellowMat : whiteMat
+            );
+            reflector.position.set(pA.x, pA.y + 0.05, pA.z);
+            this.scene.add(reflector);
+            this.trackMeshes.push(reflector);
+          }
         });
       }
 
-      // 4. Ground Terrain Plane
+      // City Sidewalk Curbs
+      if (envInfo.id === 'city' || envInfo.id === 'night_city') {
+        const curbMat = new THREE.MeshStandardMaterial({ color: 0x9e9e9e, roughness: 0.7 });
+        [-halfW - 0.9, halfW + 0.9].forEach((sideOffset) => {
+          for (let s = 10; s < totalLen - 10; s += 15) {
+            const f = this.getTrackFrame(s);
+            const walk = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 15.1), curbMat);
+            walk.position.copy(f.center).addScaledVector(f.right, sideOffset);
+            walk.position.y += 0.06;
+            walk.rotation.y = f.yaw;
+            this.scene.add(walk);
+            this.trackMeshes.push(walk);
+          }
+        });
+      }
+
+      // 4. Ground Terrain Plane & River Water
       const terrainGeo = new THREE.PlaneGeometry(600, totalLen + 300, 32, 64);
       terrainGeo.rotateX(-Math.PI / 2);
       const terrainMat = new THREE.MeshStandardMaterial({
@@ -1490,23 +1642,137 @@
       this.scene.add(terrain);
       this.trackMeshes.push(terrain);
 
-      if (envInfo.hasWater) {
-        const waterGeo = new THREE.PlaneGeometry(500, totalLen + 200);
+      if (envInfo.hasWater || envInfo.id === 'bridge' || envInfo.id === 'river') {
+        const waterGeo = new THREE.PlaneGeometry(600, totalLen + 200);
         waterGeo.rotateX(-Math.PI / 2);
         const waterMat = new THREE.MeshStandardMaterial({
-          color: 0x00bcd4,
+          color: 0x0288d1,
           transparent: true,
-          opacity: 0.75,
-          roughness: 0.1,
-          metalness: 0.5
+          opacity: 0.85,
+          roughness: 0.08,
+          metalness: 0.65
         });
         const water = new THREE.Mesh(waterGeo, waterMat);
-        water.position.set(0, -1.0, totalLen / 2);
+        water.position.set(0, -2.8, totalLen / 2);
         this.scene.add(water);
         this.trackMeshes.push(water);
+        this.animatedWaterMeshes.push(water);
       }
 
-      // 5. Checkered Finish Line Arch
+      // Grand Suspension Bridge Towers & Cables (Level 3 / Bridge Environment)
+      if (envInfo.isBridge || envInfo.id === 'bridge') {
+        const towerDists = [totalLen * 0.32, totalLen * 0.68];
+        towerDists.forEach((tDist) => {
+          const tFrame = this.getTrackFrame(tDist);
+          const towerGroup = new THREE.Group();
+          towerGroup.position.copy(tFrame.center);
+          towerGroup.rotation.y = tFrame.yaw;
+
+          const pylonMat = new THREE.MeshStandardMaterial({ color: 0xd32f2f, metalness: 0.5, roughness: 0.3 });
+
+          [-halfW - 0.8, halfW + 0.8].forEach((x) => {
+            const pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.75, 28, 8), pylonMat);
+            pylon.position.set(x, 14, 0);
+            towerGroup.add(pylon);
+          });
+
+          [11, 24].forEach((y) => {
+            const beam = new THREE.Mesh(new THREE.BoxGeometry(roadWidth + 3.2, 0.8, 0.8), pylonMat);
+            beam.position.set(0, y, 0);
+            towerGroup.add(beam);
+          });
+
+          this.scene.add(towerGroup);
+          this.trackMeshes.push(towerGroup);
+        });
+
+        // River barges floating in water below bridge
+        const boatMat = new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.6 });
+        const cargoMat = new THREE.MeshStandardMaterial({ color: 0xff9800 });
+        [-1, 1].forEach((dir, bIdx) => {
+          const bFrame = this.getTrackFrame(totalLen * (0.28 + bIdx * 0.42));
+          const boat = new THREE.Group();
+          boat.position.copy(bFrame.center).addScaledVector(bFrame.right, dir * 28);
+          boat.position.y = -2.6;
+
+          const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 1.8, 16), boatMat);
+          boat.add(hull);
+          const cargo = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.4, 11), cargoMat);
+          cargo.position.y = 1.2;
+          boat.add(cargo);
+
+          this.scene.add(boat);
+          this.trackMeshes.push(boat);
+        });
+      }
+
+      // 3D Mountain Peaks & Stone Mountain Tunnel (Level 4 / Mountains)
+      if (envInfo.isMountain || envInfo.id === 'mountains' || envInfo.hasTunnel) {
+        const peakGeo = new THREE.ConeGeometry(38, 55, 6);
+        const peakMat = new THREE.MeshStandardMaterial({ color: 0x455a64, roughness: 0.9 });
+        for (let s = 40; s < totalLen - 40; s += 90) {
+          const f = this.getTrackFrame(s);
+          [-1, 1].forEach((side) => {
+            const peak = new THREE.Mesh(peakGeo, peakMat);
+            peak.position.copy(f.center).addScaledVector(f.right, side * (42 + Math.random() * 20));
+            peak.position.y = f.center.y + 14;
+            this.scene.add(peak);
+            this.trackMeshes.push(peak);
+          });
+        }
+
+        // 3D Mountain Tunnel between 42% and 62%
+        const tunnelStart = Math.round(totalLen * 0.42);
+        const tunnelEnd = Math.round(totalLen * 0.62);
+        const tunnelPortalMat = new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.8 });
+        const tunnelTubeMat = new THREE.MeshStandardMaterial({ color: 0x1f2428, roughness: 0.9, side: THREE.DoubleSide });
+        const lampMat = new THREE.MeshBasicMaterial({ color: 0xffd54f });
+
+        [tunnelStart, tunnelEnd].forEach((tDist) => {
+          const pFrame = this.getTrackFrame(tDist);
+          const portalGroup = new THREE.Group();
+          portalGroup.position.copy(pFrame.center);
+          portalGroup.rotation.y = pFrame.yaw;
+
+          const archLeft = new THREE.Mesh(new THREE.BoxGeometry(1.4, 6.5, 2.5), tunnelPortalMat);
+          archLeft.position.set(-halfW - 0.7, 3.25, 0);
+          portalGroup.add(archLeft);
+
+          const archRight = new THREE.Mesh(new THREE.BoxGeometry(1.4, 6.5, 2.5), tunnelPortalMat);
+          archRight.position.set(halfW + 0.7, 3.25, 0);
+          portalGroup.add(archRight);
+
+          const archTop = new THREE.Mesh(new THREE.BoxGeometry(roadWidth + 2.8, 1.8, 2.5), tunnelPortalMat);
+          archTop.position.set(0, 6.8, 0);
+          portalGroup.add(archTop);
+
+          this.scene.add(portalGroup);
+          this.trackMeshes.push(portalGroup);
+        });
+
+        for (let s = tunnelStart + 6; s < tunnelEnd - 6; s += 16) {
+          const f = this.getTrackFrame(s);
+          const roofTube = new THREE.Mesh(
+            new THREE.CylinderGeometry(roadWidth * 0.58, roadWidth * 0.58, 16.5, 12, 1, true, 0, Math.PI),
+            tunnelTubeMat
+          );
+          roofTube.position.copy(f.center);
+          roofTube.position.y += 2.0;
+          roofTube.rotation.y = f.yaw;
+          roofTube.rotation.z = Math.PI / 2;
+          this.scene.add(roofTube);
+          this.trackMeshes.push(roofTube);
+
+          const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 1.8), lampMat);
+          lamp.position.copy(f.center);
+          lamp.position.y += 5.2;
+          lamp.rotation.y = f.yaw;
+          this.scene.add(lamp);
+          this.trackMeshes.push(lamp);
+        }
+      }
+
+      // 5. Checkered Finish Line Arch with Marshals
       const finishFrame = this.getTrackFrame(totalLen);
       const gateGroup = new THREE.Group();
       gateGroup.position.copy(finishFrame.center);
@@ -1521,6 +1787,16 @@
       const banner = new THREE.Mesh(new THREE.BoxGeometry(roadWidth + 1.2, 1.4, 0.4), new THREE.MeshStandardMaterial({ color: 0xffcc00 }));
       banner.position.set(0, 6.2, 0);
       gateGroup.add(banner);
+
+      if (typeof window.buildCartoonPedestrian === 'function') {
+        [-halfW - 1.2, halfW + 1.2].forEach((sideX) => {
+          const marshal = window.buildCartoonPedestrian('checkpoint');
+          marshal.root.position.set(sideX, 0, 0);
+          marshal.root.rotation.y = sideX < 0 ? Math.PI / 2 : -Math.PI / 2;
+          gateGroup.add(marshal.root);
+          this.animatedPedestrians.push(marshal);
+        });
+      }
 
       this.scene.add(gateGroup);
       this.trackMeshes.push(gateGroup);
@@ -1567,20 +1843,112 @@
           this.scene.add(propMesh);
           this.props.push(propMesh);
         }
+
+        // Spawn Pedestrian NPCs alongside road
+        if (typeof window.buildCartoonPedestrian === 'function') {
+          if ((envInfo.id === 'city' || envInfo.id === 'night_city') && i % 4 === 0) {
+            const ped = window.buildCartoonPedestrian('city');
+            ped.root.position.copy(frame.center).addScaledVector(frame.right, sideSign * (this.ROAD_WIDTH / 2 + 1.2));
+            ped.root.position.y = frame.center.y + 0.08;
+            ped.root.rotation.y = sideSign > 0 ? -Math.PI / 2 : Math.PI / 2;
+            this.scene.add(ped.root);
+            this.animatedPedestrians.push(ped);
+            this.props.push(ped.root);
+          } else if (envInfo.id === 'village' && i % 5 === 0) {
+            const villager = window.buildCartoonPedestrian('village');
+            villager.root.position.copy(frame.center).addScaledVector(frame.right, sideSign * (this.ROAD_WIDTH / 2 + 3.2));
+            villager.root.position.y = frame.center.y;
+            villager.root.rotation.y = sideSign > 0 ? -Math.PI / 2 : Math.PI / 2;
+            this.scene.add(villager.root);
+            this.animatedPedestrians.push(villager);
+            this.props.push(villager.root);
+          } else if ((envInfo.id === 'mountains' || envInfo.id === 'forest') && i % 7 === 0) {
+            const hiker = window.buildCartoonPedestrian('mountains');
+            hiker.root.position.copy(frame.center).addScaledVector(frame.right, sideSign * (this.ROAD_WIDTH / 2 + 4.2));
+            hiker.root.position.y = frame.center.y;
+            this.scene.add(hiker.root);
+            this.animatedPedestrians.push(hiker);
+            this.props.push(hiker.root);
+          }
+        }
       }
     }
 
     createPropMesh(type) {
       const g = new THREE.Group();
-      if (type === 'skyscraper') {
-        const h = 25 + Math.random() * 35;
-        const w = 10 + Math.random() * 8;
+      if (type === 'skyscraper' || type === 'neon_skyscraper') {
+        const h = 28 + Math.random() * 38;
+        const w = 11 + Math.random() * 8;
         const b = new THREE.Mesh(
           new THREE.BoxGeometry(w, h, w),
-          new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.3 })
+          new THREE.MeshStandardMaterial({
+            color: type === 'neon_skyscraper' ? 0x0f172a : 0x37474f,
+            roughness: 0.3
+          })
         );
         b.position.y = h / 2;
         g.add(b);
+
+        // Neon outline or windows for night city
+        if (type === 'neon_skyscraper') {
+          const neonBorder = new THREE.BoxHelper(b, Math.random() > 0.5 ? 0x00f0ff : 0xff007f);
+          g.add(neonBorder);
+        }
+      } else if (type === 'neon_billboard') {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 7, 8), new THREE.MeshStandardMaterial({ color: 0x222222 }));
+        pole.position.y = 3.5;
+        g.add(pole);
+
+        const board = new THREE.Mesh(
+          new THREE.BoxGeometry(6.5, 3.2, 0.3),
+          new THREE.MeshStandardMaterial({ color: 0x0a1026, roughness: 0.2 })
+        );
+        board.position.y = 7.0;
+        g.add(board);
+
+        const neonText = new THREE.Mesh(
+          new THREE.BoxGeometry(5.8, 2.5, 0.35),
+          new THREE.MeshBasicMaterial({ color: Math.random() > 0.5 ? 0x00ffff : 0xff0055 })
+        );
+        neonText.position.y = 7.0;
+        g.add(neonText);
+      } else if (type === 'streetlight' || type === 'cyber_lamp') {
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0x455a64, metalness: 0.7, roughness: 0.3 });
+        const lampMat = new THREE.MeshBasicMaterial({ color: type === 'cyber_lamp' ? 0x00e5ff : 0xffea00 });
+
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 6.5, 8), poleMat);
+        pole.position.y = 3.25;
+        g.add(pole);
+
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.1, 0.1), poleMat);
+        arm.position.set(-0.7, 6.4, 0);
+        g.add(arm);
+
+        const lampBox = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.35), lampMat);
+        lampBox.position.set(-1.4, 6.3, 0);
+        g.add(lampBox);
+      } else if (type === 'windmill') {
+        // Rustic Windmill
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 2.6, 9, 12), new THREE.MeshStandardMaterial({ color: 0xf5f5f5 }));
+        base.position.y = 4.5;
+        g.add(base);
+
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(2.2, 2.4, 12), new THREE.MeshStandardMaterial({ color: 0x8d6e63 }));
+        roof.position.y = 10.2;
+        g.add(roof);
+
+        // 4 Rotating Blades Fan
+        const fanGroup = new THREE.Group();
+        fanGroup.position.set(0, 9.2, 1.9);
+        const bladeMat = new THREE.MeshStandardMaterial({ color: 0x4e342e });
+        for (let b = 0; b < 4; b++) {
+          const blade = new THREE.Mesh(new THREE.BoxGeometry(0.35, 4.2, 0.05), bladeMat);
+          blade.rotation.z = (b * Math.PI) / 2;
+          blade.position.set(Math.sin((b * Math.PI) / 2) * 2.1, Math.cos((b * Math.PI) / 2) * 2.1, 0);
+          fanGroup.add(blade);
+        }
+        g.add(fanGroup);
+        this.animatedWindmills.push(fanGroup);
       } else if (type === 'pine_tree' || type === 'snow_pine') {
         const trunk = new THREE.Mesh(
           new THREE.CylinderGeometry(0.3, 0.4, 2.5, 6),
@@ -1597,6 +1965,28 @@
           cone.position.y = 2.4 + idx * 1.5;
           g.add(cone);
         });
+      } else if (type === 'redwood_tree') {
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.8, 1.2, 8, 8),
+          new THREE.MeshStandardMaterial({ color: 0x4e342e })
+        );
+        trunk.position.y = 4;
+        g.add(trunk);
+
+        const leafMat = new THREE.MeshStandardMaterial({ color: 0x1b5e20 });
+        [5.2, 4.2, 3.2, 2.2].forEach((r, idx) => {
+          const cone = new THREE.Mesh(new THREE.ConeGeometry(r, 3.2, 8), leafMat);
+          cone.position.y = 6 + idx * 2.2;
+          g.add(cone);
+        });
+      } else if (type === 'willow_tree') {
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 3, 6), new THREE.MeshStandardMaterial({ color: 0x5d4037 }));
+        trunk.position.y = 1.5;
+        g.add(trunk);
+        const foliage = new THREE.Mesh(new THREE.SphereGeometry(2.8, 8, 8), new THREE.MeshStandardMaterial({ color: 0x66bb6a }));
+        foliage.scale.set(1.2, 1.5, 1.2);
+        foliage.position.y = 4.2;
+        g.add(foliage);
       } else if (type === 'saguaro_cactus') {
         const green = new THREE.MeshStandardMaterial({ color: 0x43a047 });
         const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 6, 8), green);
@@ -1613,6 +2003,20 @@
         roof.rotation.y = Math.PI / 4;
         roof.position.y = 5.2;
         g.add(roof);
+      } else if (type === 'fence') {
+        const wood = new THREE.MeshStandardMaterial({ color: 0x6d4c41 });
+        const post1 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2, 0.15), wood);
+        post1.position.set(-2, 0.6, 0);
+        g.add(post1);
+        const post2 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.2, 0.15), wood);
+        post2.position.set(2, 0.6, 0);
+        g.add(post2);
+        const rail1 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.12, 0.08), wood);
+        rail1.position.set(0, 0.85, 0);
+        g.add(rail1);
+        const rail2 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.12, 0.08), wood);
+        rail2.position.set(0, 0.45, 0);
+        g.add(rail2);
       } else {
         const rock = new THREE.Mesh(
           new THREE.DodecahedronGeometry(1.6 + Math.random() * 1.2),
@@ -1711,9 +2115,27 @@
 
       for (let i = 0; i < totalVehicles; i++) {
         const laneCfg = laneConfigs[i % laneConfigs.length];
-        const carConfig = window.CAR_CONFIGS[(i + 1) % window.CAR_CONFIGS.length];
         const color = trafficColors[i % trafficColors.length];
-        const trafficCar = window.buildCarModel(carConfig, color);
+
+        let vType = 'sedan';
+        if (level.environment === 'city' || level.environment === 'night_city') {
+          const cTypes = ['taxi', 'police', 'sedan', 'bus'];
+          vType = cTypes[i % cTypes.length];
+        } else if (level.environment === 'village') {
+          const vTypes = ['truck', 'sedan'];
+          vType = vTypes[i % vTypes.length];
+        } else if (level.environment === 'bridge') {
+          const bTypes = ['bus', 'truck', 'sedan', 'police'];
+          vType = bTypes[i % bTypes.length];
+        } else {
+          const oTypes = ['truck', 'sedan'];
+          vType = oTypes[i % oTypes.length];
+        }
+
+        const trafficCar = (typeof window.buildSpecializedTrafficCar === 'function')
+          ? window.buildSpecializedTrafficCar(vType, color)
+          : window.buildCarModel(window.CAR_CONFIGS[i % window.CAR_CONFIGS.length], color);
+
         this.scene.add(trafficCar.root);
 
         const dist = 70 + i * (level.roadLength / (totalVehicles + 1));
@@ -1724,7 +2146,8 @@
           dist: dist,
           speed: speed,
           lane: laneCfg.offset,
-          dir: laneCfg.dir
+          dir: laneCfg.dir,
+          policeLights: trafficCar.policeLights
         });
       }
     }
@@ -1916,12 +2339,14 @@
         this.lateralVel = -Math.abs(this.lateralVel) * 0.35;
         this.speed *= 0.9;
         this.suspensionBounce = 0.25;
+        this.camShake = 0.35;
         this.sound.playBarrierScrape();
       } else if (this.lateralOffset < -this.LATERAL_LIMIT) {
         this.lateralOffset = -this.LATERAL_LIMIT;
         this.lateralVel = Math.abs(this.lateralVel) * 0.35;
         this.speed *= 0.9;
         this.suspensionBounce = 0.25;
+        this.camShake = 0.35;
         this.sound.playBarrierScrape();
       }
 
@@ -2060,18 +2485,21 @@
             if (Math.abs(this.speed) > 6) {
               this.suspensionBounce = 0.45;
               this.speed *= 0.85;
+              this.camShake = 0.35;
               this.sound.playBarrierScrape();
             }
           } else if (obs.type === 'pothole') {
             if (Math.abs(obs.lateralOffset - this.lateralOffset) < 1.4) {
               this.speed *= 0.8;
               this.suspensionBounce = 0.3;
+              this.camShake = 0.3;
               this.takeDamage(6);
             }
           } else if (obs.type === 'rock') {
             if (Math.abs(obs.lateralOffset - this.lateralOffset) < 1.6) {
               this.takeDamage(18);
               this.speed *= -0.3;
+              this.camShake = 0.6;
               obs.lateralOffset += 20;
               obs.mesh.visible = false;
               this.sound.playCrash();
@@ -2137,6 +2565,7 @@
             this.lateralOffset += Math.sign(this.lateralOffset - t.lane) * 0.45;
             this.speed *= 0.55;
             this.takeDamage(16);
+            this.camShake = 0.65;
             this.sound.playCrash();
           }
         }
@@ -2275,6 +2704,265 @@
           arrowEl.style.transform = `rotate(${deg}deg)`;
         }
       }
+
+      // Render GPS Radar Minimap
+      this.renderMinimap();
+    }
+
+    // ------------------------------------------------------------------------
+    // REAL-TIME GPS TARGET MINIMAP (Heading-Up Navigation Radar)
+    // ------------------------------------------------------------------------
+    renderMinimap() {
+      if (!this.minimapCtx || !this.minimapCanvas) return;
+      const ctx = this.minimapCtx;
+      const w = this.minimapCanvas.width;
+      const h = this.minimapCanvas.height;
+      const cx = w / 2;
+      const cy = h / 2;
+      const radius = w / 2 - 4;
+
+      ctx.clearRect(0, 0, w, h);
+      if (!this.carInstance || this.trackWaypoints.length < 2) return;
+
+      const carWorldPos = this.carInstance.root.position;
+      const carHeading = this.carInstance.root.rotation.y;
+      const scale = 0.52; // 1m in 3D world = 0.52px on radar
+
+      // Heading-up transform helper: 3D world (wx, wz) -> Radar screen (sx, sy)
+      const cosH = Math.cos(-carHeading);
+      const sinH = Math.sin(-carHeading);
+
+      const toRadar = (wx, wz) => {
+        const dx = wx - carWorldPos.x;
+        const dz = wz - carWorldPos.z;
+        const rx = (dx * cosH - dz * sinH) * scale;
+        const ry = -(dx * sinH + dz * cosH) * scale;
+        return { x: cx + rx, y: cy + ry };
+      };
+
+      ctx.save();
+
+      // Circular clip mask
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.clip();
+
+      // Dark Radar Background
+      ctx.fillStyle = '#0a101d';
+      ctx.fillRect(0, 0, w, h);
+
+      // Radar Concentric Range Rings & Crosshairs
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.14)';
+      ctx.lineWidth = 1;
+      [20, 38, 56].forEach((r) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - radius);
+      ctx.lineTo(cx, cy + radius);
+      ctx.moveTo(cx - radius, cy);
+      ctx.lineTo(cx + radius, cy);
+      ctx.stroke();
+
+      // 1. Draw Road Ribbon on Radar
+      const minSampleDist = Math.max(0, this.trackDist - 45);
+      const maxSampleDist = Math.min(this.trackLength, this.trackDist + 130);
+      const roadHalfW = this.ROAD_WIDTH / 2;
+
+      const leftEdges = [];
+      const rightEdges = [];
+
+      for (let d = minSampleDist; d <= maxSampleDist; d += 8) {
+        const f = this.getTrackFrame(d);
+        const leftPt = f.center.clone().addScaledVector(f.right, -roadHalfW);
+        const rightPt = f.center.clone().addScaledVector(f.right, roadHalfW);
+        leftEdges.push(toRadar(leftPt.x, leftPt.z));
+        rightEdges.push(toRadar(rightPt.x, rightPt.z));
+      }
+
+      if (leftEdges.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(leftEdges[0].x, leftEdges[0].y);
+        for (let i = 1; i < leftEdges.length; i++) {
+          ctx.lineTo(leftEdges[i].x, leftEdges[i].y);
+        }
+        for (let i = rightEdges.length - 1; i >= 0; i--) {
+          ctx.lineTo(rightEdges[i].x, rightEdges[i].y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#1e2638';
+        ctx.fill();
+        ctx.strokeStyle = '#37474f';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      }
+
+      // 2. Draw GPS Neon Route Line Along Road Spline
+      const currentObj = this.objectives[this.currentObjectiveIndex];
+      const targetDist = currentObj ? currentObj.dist : this.trackLength;
+      const routeEndDist = Math.min(maxSampleDist, targetDist);
+
+      if (routeEndDist > this.trackDist) {
+        ctx.beginPath();
+        for (let d = this.trackDist; d <= routeEndDist; d += 5) {
+          const f = this.getTrackFrame(d);
+          const p = toRadar(f.center.x, f.center.z);
+          if (d === this.trackDist) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = '#00f0ff';
+        ctx.shadowBlur = 6;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+
+      // 3. Draw Checkpoints on Radar
+      this.checkpoints.forEach((cp) => {
+        if (cp.reached) return;
+        const p = toRadar(cp.group.position.x, cp.group.position.z);
+        const rDist = Math.hypot(p.x - cx, p.y - cy);
+        if (rDist < radius - 2) {
+          const isTarget = currentObj && currentObj.cpRef === cp;
+          const sz = isTarget ? 6.5 : 4.5;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(Math.PI / 4);
+          ctx.fillStyle = isTarget ? '#ffeb3b' : '#00e676';
+          ctx.fillRect(-sz / 2, -sz / 2, sz, sz);
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(-sz / 2, -sz / 2, sz, sz);
+          ctx.restore();
+        }
+      });
+
+      // Finish Line Marker on Radar
+      const finishFrame = this.getTrackFrame(this.trackLength);
+      const finRadar = toRadar(finishFrame.center.x, finishFrame.center.z);
+      if (Math.hypot(finRadar.x - cx, finRadar.y - cy) < radius - 2) {
+        ctx.fillStyle = '#ff1744';
+        ctx.beginPath();
+        ctx.arc(finRadar.x, finRadar.y, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+
+      // 4. Traffic Vehicles on Radar
+      this.trafficCars.forEach((t) => {
+        const tFrame = this.getTrackFrame(t.dist);
+        const tPos = tFrame.center.clone().addScaledVector(tFrame.right, t.lane);
+        const p = toRadar(tPos.x, tPos.z);
+        const distFromCenter = Math.hypot(p.x - cx, p.y - cy);
+        if (distFromCenter < radius - 3) {
+          ctx.fillStyle = t.dir > 0 ? '#ff9800' : '#ff3d00';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      });
+
+      // 5. Player Car Arrow at Radar Center (Facing Upwards)
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.fillStyle = '#ffd600';
+      ctx.beginPath();
+      ctx.moveTo(0, -9);
+      ctx.lineTo(5.5, 6);
+      ctx.lineTo(0, 3.5);
+      ctx.lineTo(-5.5, 6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#00e676';
+      ctx.beginPath();
+      ctx.arc(0, 0, 1.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.restore(); // Restore clip
+
+      // Update Rotating North Compass
+      const compassEl = document.getElementById('minimap-compass-n');
+      if (compassEl) {
+        const northRad = -carHeading;
+        const nDist = radius - 7;
+        const nx = cx + Math.sin(northRad) * nDist;
+        const ny = cy - Math.cos(northRad) * nDist;
+        compassEl.style.left = `${nx}px`;
+        compassEl.style.top = `${ny}px`;
+        compassEl.style.transform = `translate(-50%, -50%) rotate(${Math.round(northRad * 180 / Math.PI)}deg)`;
+      }
+
+      // Update Target Distance Badge
+      const badgeEl = document.getElementById('minimap-target-badge');
+      if (badgeEl && currentObj) {
+        const dRem = Math.max(0, Math.round(currentObj.dist - this.trackDist));
+        badgeEl.textContent = `🎯 ${dRem}m`;
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // DYNAMIC WORLD ANIMATIONS & EFFECTS
+    // ------------------------------------------------------------------------
+    updateWorldAnimations(dt) {
+      const time = this.clock.getElapsedTime();
+
+      // 1. Pedestrian NPCs walk & cheer
+      this.animatedPedestrians.forEach((ped) => {
+        const cycle = Math.sin(time * 5 + ped.animOffset);
+        if (ped.leftLeg) ped.leftLeg.rotation.x = cycle * 0.45;
+        if (ped.rightLeg) ped.rightLeg.rotation.x = -cycle * 0.45;
+        if (ped.type === 'checkpoint') {
+          if (ped.rightArm) {
+            ped.rightArm.rotation.x = -Math.PI / 3 + Math.sin(time * 8 + ped.animOffset) * 0.35;
+            ped.rightArm.rotation.z = Math.sin(time * 6 + ped.animOffset) * 0.2;
+          }
+        } else {
+          if (ped.leftArm) ped.leftArm.rotation.x = -cycle * 0.4;
+          if (ped.rightArm) ped.rightArm.rotation.x = cycle * 0.4;
+        }
+      });
+
+      // 2. Windmill blades spin
+      this.animatedWindmills.forEach((fan) => {
+        fan.rotation.z += dt * 1.5;
+      });
+
+      // 3. Water surface waves
+      this.animatedWaterMeshes.forEach((water) => {
+        water.position.y = -2.8 + Math.sin(time * 1.8) * 0.12;
+      });
+
+      // 4. Police Cruiser lightbars
+      this.trafficCars.forEach((t) => {
+        if (t.policeLights) {
+          t.policeLights.phase += dt * 9.0;
+          const flash = Math.sin(t.policeLights.phase) > 0;
+          t.policeLights.red.emissiveIntensity = flash ? 3.0 : 0.2;
+          t.policeLights.blue.emissiveIntensity = !flash ? 3.0 : 0.2;
+        }
+      });
+
+      // 5. Camera Shake on Collisions / Bumps
+      if (this.camShake > 0) {
+        this.camera.position.x += (Math.random() - 0.5) * this.camShake;
+        this.camera.position.y += (Math.random() - 0.5) * this.camShake;
+        this.camShake = Math.max(0, this.camShake - dt * 3.5);
+      }
     }
 
     // ------------------------------------------------------------------------
@@ -2353,6 +3041,12 @@
 
         const isNitro = this.input.nitro && this.nitroLevel > 5;
         this.updateCamera(rawDelta, isNitro);
+        this.updateWorldAnimations(rawDelta);
+
+        // Tire screech when drifting sharply or handbraking at speed
+        if ((this.input.handbrake || (Math.abs(this.relativeAngle) > 0.26 && Math.abs(this.speed) > 11)) && Math.random() < 0.1) {
+          this.sound.playTireScreech();
+        }
 
         const speedKmH = Math.round(Math.abs(this.speed) * 3.6);
         this.sound.updateEngine(speedKmH, this.playerMaxSpeed * 3.6, this.input.gas || isNitro);

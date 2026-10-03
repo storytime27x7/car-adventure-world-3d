@@ -802,3 +802,306 @@ window.buildCarModel = function (carConfig, paintColorHex) {
 
   return carRefs;
 };
+
+// ----------------------------------------------------------------------------
+// CARTOON PEDESTRIAN / NPC BUILDER
+// ----------------------------------------------------------------------------
+window.buildCartoonPedestrian = function (type = 'city') {
+  const root = new THREE.Group();
+  root.name = `pedestrian_${type}`;
+
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdfc4, roughness: 0.6 });
+  const pantsMat = new THREE.MeshStandardMaterial({
+    color: type === 'village' ? 0x1565c0 : type === 'mountains' ? 0x4e342e : 0x263238
+  });
+  const shirtMat = new THREE.MeshStandardMaterial({
+    color: type === 'checkpoint' ? 0xffeb3b : type === 'village' ? 0xd84315 : type === 'city' ? 0x0288d1 : 0x2e7d32
+  });
+  const hairMat = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.8 });
+
+  // Hip pivot / pelvis
+  const pelvis = new THREE.Group();
+  pelvis.position.y = 0.8;
+  root.add(pelvis);
+
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.48, 0.24), shirtMat);
+  torso.position.y = 0.24;
+  pelvis.add(torso);
+
+  // Head
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.28, 0.26), skinMat);
+  head.position.y = 0.62;
+  pelvis.add(head);
+
+  // Hair or Hat
+  if (type === 'village') {
+    // Straw hat
+    const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.36, 0.08, 10), new THREE.MeshStandardMaterial({ color: 0xffd54f }));
+    hat.position.y = 0.78;
+    pelvis.add(hat);
+  } else if (type === 'checkpoint') {
+    // Baseball cap
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.32), new THREE.MeshStandardMaterial({ color: 0xd32f2f }));
+    cap.position.y = 0.78;
+    pelvis.add(cap);
+  } else {
+    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.28), hairMat);
+    hair.position.y = 0.78;
+    pelvis.add(hair);
+  }
+
+  // Backpack for hiker
+  if (type === 'mountains' || type === 'forest') {
+    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.38, 0.18), new THREE.MeshStandardMaterial({ color: 0xef6c00 }));
+    pack.position.set(0, 0.24, -0.18);
+    pelvis.add(pack);
+  }
+
+  // Legs with hip pivot
+  const legGeo = new THREE.BoxGeometry(0.14, 0.75, 0.14);
+  const leftLeg = new THREE.Group();
+  leftLeg.position.set(-0.11, 0, 0);
+  const leftLegMesh = new THREE.Mesh(legGeo, pantsMat);
+  leftLegMesh.position.y = -0.375;
+  leftLeg.add(leftLegMesh);
+  pelvis.add(leftLeg);
+
+  const rightLeg = new THREE.Group();
+  rightLeg.position.set(0.11, 0, 0);
+  const rightLegMesh = new THREE.Mesh(legGeo, pantsMat);
+  rightLegMesh.position.y = -0.375;
+  rightLeg.add(rightLegMesh);
+  pelvis.add(rightLeg);
+
+  // Arms with shoulder pivot
+  const armGeo = new THREE.BoxGeometry(0.11, 0.42, 0.11);
+  const leftArm = new THREE.Group();
+  leftArm.position.set(-0.25, 0.42, 0);
+  const leftArmMesh = new THREE.Mesh(armGeo, shirtMat);
+  leftArmMesh.position.y = -0.21;
+  leftArm.add(leftArmMesh);
+  pelvis.add(leftArm);
+
+  const rightArm = new THREE.Group();
+  rightArm.position.set(0.25, 0.42, 0);
+  const rightArmMesh = new THREE.Mesh(armGeo, shirtMat);
+  rightArmMesh.position.y = -0.21;
+  rightArm.add(rightArmMesh);
+  pelvis.add(rightArm);
+
+  // Checkpoint flag for race marshal
+  if (type === 'checkpoint') {
+    const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0xeeeeee }));
+    flagPole.position.set(0.12, -0.15, 0.3);
+    flagPole.rotation.x = Math.PI / 4;
+    rightArm.add(flagPole);
+
+    const flagMesh = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.25, 0.02), new THREE.MeshStandardMaterial({ color: 0x00e5ff }));
+    flagMesh.position.set(0.25, 0.1, 0.55);
+    rightArm.add(flagMesh);
+    rightArm.rotation.x = -Math.PI / 3; // Waving upwards
+  }
+
+  root.scale.set(1.2, 1.2, 1.2);
+
+  return {
+    root: root,
+    leftLeg: leftLeg,
+    rightLeg: rightLeg,
+    leftArm: leftArm,
+    rightArm: rightArm,
+    type: type,
+    animOffset: Math.random() * Math.PI * 2
+  };
+};
+
+// ----------------------------------------------------------------------------
+// SPECIALIZED TRAFFIC VEHICLES (Police, Taxi, Bus, Truck, Sedan)
+// ----------------------------------------------------------------------------
+window.buildSpecializedTrafficCar = function (type = 'sedan', colorHex = '#1e88e5') {
+  const root = new THREE.Group();
+  root.name = `traffic_${type}`;
+
+  const chromeMat = new THREE.MeshStandardMaterial({ color: 0xdcdcdc, metalness: 0.8, roughness: 0.2 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x102027, metalness: 0.9, roughness: 0.1, transparent: true, opacity: 0.85 });
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1f1f1f, roughness: 0.9 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.7, roughness: 0.3 });
+  const brakeMat = new THREE.MeshStandardMaterial({ color: 0xff1744, emissive: 0xff1744, emissiveIntensity: 0.6 });
+
+  const addWheel = (parent, x, y, z, r = 0.42, w = 0.3) => {
+    const geo = new THREE.CylinderGeometry(r, r, w, 14);
+    geo.rotateZ(Math.PI / 2);
+    const m = new THREE.Mesh(geo, wheelMat);
+    m.position.set(x, y, z);
+
+    const capGeo = new THREE.CylinderGeometry(r * 0.55, r * 0.55, w + 0.02, 10);
+    capGeo.rotateZ(Math.PI / 2);
+    const rim = new THREE.Mesh(capGeo, rimMat);
+    m.add(rim);
+
+    parent.add(m);
+    return m;
+  };
+
+  let policeLights = null;
+
+  if (type === 'bus') {
+    // City Bus Model
+    const busBodyMat = new THREE.MeshStandardMaterial({ color: 0x00bcd4, roughness: 0.4 });
+    const busLowerMat = new THREE.MeshStandardMaterial({ color: 0x00838f, roughness: 0.5 });
+
+    const lowerBody = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.9, 7.2), busLowerMat);
+    lowerBody.position.y = 0.75;
+    root.add(lowerBody);
+
+    const upperBody = new THREE.Mesh(new THREE.BoxGeometry(2.3, 1.3, 7.2), busBodyMat);
+    upperBody.position.y = 1.85;
+    root.add(upperBody);
+
+    // Continuous glass windows
+    const sideGlass = new THREE.Mesh(new THREE.BoxGeometry(2.35, 0.65, 6.2), glassMat);
+    sideGlass.position.y = 1.95;
+    root.add(sideGlass);
+
+    // Windshield
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.85, 0.2), glassMat);
+    windshield.position.set(0, 1.85, 3.55);
+    root.add(windshield);
+
+    // Wheels (6 wheels for heavy bus)
+    [-1.05, 1.05].forEach((x) => {
+      addWheel(root, x, 0.45, 2.3, 0.45, 0.32);
+      addWheel(root, x, 0.45, -1.8, 0.45, 0.32);
+      addWheel(root, x, 0.45, -2.8, 0.45, 0.32);
+    });
+
+  } else if (type === 'truck') {
+    // Country / Work Pickup Truck
+    const cabMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHex), roughness: 0.4 });
+    const bedMat = new THREE.MeshStandardMaterial({ color: 0x37474f, roughness: 0.6 });
+
+    // Cab
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.25, 2.2), cabMat);
+    cab.position.set(0, 1.1, 0.8);
+    root.add(cab);
+
+    // Windshield
+    const ws = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.65, 0.1), glassMat);
+    ws.position.set(0, 1.35, 1.88);
+    root.add(ws);
+
+    // Truck bed
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.8, 2.4), bedMat);
+    bed.position.set(0, 0.85, -1.4);
+    root.add(bed);
+
+    // Cargo crates in bed
+    const crateMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.8 });
+    const crate1 = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 0.7), crateMat);
+    crate1.position.set(-0.4, 1.2, -1.2);
+    root.add(crate1);
+
+    const crate2 = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.5, 0.6), crateMat);
+    crate2.position.set(0.4, 1.15, -1.5);
+    root.add(crate2);
+
+    [-1.0, 1.0].forEach((x) => {
+      addWheel(root, x, 0.45, 1.3, 0.45, 0.34);
+      addWheel(root, x, 0.45, -1.5, 0.45, 0.34);
+    });
+
+  } else if (type === 'police') {
+    // Police Cruiser with Flashing Lightbar
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.3 });
+    const whiteDoorMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.3 });
+
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.55, 4.2), bodyMat);
+    lower.position.y = 0.55;
+    root.add(lower);
+
+    // White door inserts
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.94, 0.45, 1.8), whiteDoorMat);
+    door.position.set(0, 0.55, 0);
+    root.add(door);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 2.2), glassMat);
+    cabin.position.set(0, 1.1, -0.15);
+    root.add(cabin);
+
+    // Roof lightbar (Red & Blue flashing lenses)
+    const barBase = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, 0.25), chromeMat);
+    barBase.position.set(0, 1.45, -0.15);
+    root.add(barBase);
+
+    const redLensMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 2.0 });
+    const blueLensMat = new THREE.MeshStandardMaterial({ color: 0x0044ff, emissive: 0x0044ff, emissiveIntensity: 0.4 });
+
+    const redLens = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.2), redLensMat);
+    redLens.position.set(-0.3, 1.54, -0.15);
+    root.add(redLens);
+
+    const blueLens = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.2), blueLensMat);
+    blueLens.position.set(0.3, 1.54, -0.15);
+    root.add(blueLens);
+
+    policeLights = { red: redLensMat, blue: blueLensMat, phase: 0 };
+
+    [-0.95, 0.95].forEach((x) => {
+      addWheel(root, x, 0.4, 1.25, 0.4, 0.28);
+      addWheel(root, x, 0.4, -1.25, 0.4, 0.28);
+    });
+
+  } else if (type === 'taxi') {
+    // City Yellow Taxi
+    const taxiMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, roughness: 0.35 });
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.55, 4.0), taxiMat);
+    lower.position.y = 0.55;
+    root.add(lower);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 2.1), glassMat);
+    cabin.position.set(0, 1.1, -0.1);
+    root.add(cabin);
+
+    // Glowing TAXI roof sign
+    const signMat = new THREE.MeshStandardMaterial({ color: 0xfff9c4, emissive: 0xffeb3b, emissiveIntensity: 1.2 });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.18, 0.24), signMat);
+    sign.position.set(0, 1.48, -0.1);
+    root.add(sign);
+
+    [-0.95, 0.95].forEach((x) => {
+      addWheel(root, x, 0.4, 1.2, 0.4, 0.28);
+      addWheel(root, x, 0.4, -1.2, 0.4, 0.28);
+    });
+
+  } else {
+    // Standard Sedan / SUV
+    const carMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(colorHex), roughness: 0.4 });
+    const lower = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.55, 4.0), carMat);
+    lower.position.y = 0.55;
+    root.add(lower);
+
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.62, 2.1), glassMat);
+    cabin.position.set(0, 1.12, -0.1);
+    root.add(cabin);
+
+    [-0.95, 0.95].forEach((x) => {
+      addWheel(root, x, 0.4, 1.2, 0.4, 0.28);
+      addWheel(root, x, 0.4, -1.2, 0.4, 0.28);
+    });
+  }
+
+  // Brake lights on all traffic vehicles
+  [-0.65, 0.65].forEach((x) => {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.08), brakeMat);
+    b.position.set(x, 0.6, type === 'bus' ? -3.62 : type === 'truck' ? -2.62 : -2.02);
+    root.add(b);
+  });
+
+  return {
+    root: root,
+    type: type,
+    policeLights: policeLights,
+    brakelightMat: brakeMat
+  };
+};
