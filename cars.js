@@ -401,13 +401,12 @@ window.buildCarModel = function (carConfig, paintColorHex) {
   const bodyMat = createCarMaterial(paintColorHex || carConfig.baseColor);
   const darkTrimMat = new THREE.MeshStandardMaterial({ color: 0x263238, roughness: 0.6 });
   const chromeMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.2, metalness: 0.8 });
-  const glassMat = new THREE.MeshPhysicalMaterial({
+  const glassMat = new THREE.MeshStandardMaterial({
     color: 0x81d4fa,
     transparent: true,
-    opacity: 0.42,
+    opacity: 0.45,
     roughness: 0.1,
-    transmission: 0.6,
-    thickness: 0.2
+    metalness: 0.8
   });
 
   // Emissive Lights Materials

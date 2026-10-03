@@ -563,7 +563,6 @@
 
       this.initThree();
       this.initUI();
-      this.initGarageScene();
 
       window.gameInstance = this;
 
@@ -580,22 +579,51 @@
       this.scene.background = new THREE.Color(0x87ceeb);
       this.scene.fog = new THREE.FogExp2(0xb0e0e6, 0.0035);
 
-      const aspect = window.innerWidth / window.innerHeight;
+      const w = window.innerWidth || 1280;
+      const h = window.innerHeight || 720;
+      const aspect = w / h;
       this.camera = new THREE.PerspectiveCamera(62, aspect, 0.2, 800);
 
-      this.renderer = new THREE.WebGLRenderer({
-        canvas: this.canvas,
-        antialias: this.data.graphicsQuality !== 'low',
-        powerPreference: 'high-performance'
-      });
-      this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
+      try {
+        this.renderer = new THREE.WebGLRenderer({
+          canvas: this.canvas,
+          antialias: this.data.graphicsQuality !== 'low',
+          powerPreference: 'default',
+          preserveDrawingBuffer: false,
+          alpha: false
+        });
+      } catch (e) {
+        console.warn('WebGL init fallback with basic context:', e);
+        this.renderer = new THREE.WebGLRenderer({
+          canvas: this.canvas,
+          antialias: false,
+          alpha: false
+        });
+      }
+
+      this.renderer.setSize(w, h);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.0));
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
       this.renderer.toneMappingExposure = 1.05;
 
       if (this.data.graphicsQuality === 'high') {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      }
+
+      // Handle WebGL Context Lost & Restored
+      if (this.canvas) {
+        this.canvas.addEventListener('webglcontextlost', (e) => {
+          e.preventDefault();
+          console.warn('Game Canvas WebGL Context Lost');
+        }, false);
+        this.canvas.addEventListener('webglcontextrestored', () => {
+          console.log('Game Canvas WebGL Context Restored, reinitializing');
+          this.initThree();
+          if (this.isPlaying && this.currentLevel) {
+            this.startLevelGameplay(this.currentLevelIndex);
+          }
+        }, false);
       }
 
       this.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -611,11 +639,11 @@
       this.scene.add(this.sunLight);
 
       window.addEventListener('resize', () => {
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        this.camera.aspect = w / h;
+        const rw = window.innerWidth || 1280;
+        const rh = window.innerHeight || 720;
+        this.camera.aspect = rw / rh;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(w, h);
+        this.renderer.setSize(rw, rh);
       });
     }
 
@@ -951,6 +979,10 @@
       this.hideAllModals();
       document.getElementById('modal-garage').classList.add('active');
 
+      if (!this.garageRenderer) {
+        this.initGarageScene();
+      }
+
       const currentId = this.data.selectedCar || 'beetle';
       const foundIdx = window.CAR_CONFIGS.findIndex((c) => c.id === currentId);
       this.garageCarConfigIndex = foundIdx >= 0 ? foundIdx : 0;
@@ -1149,6 +1181,14 @@
       this.hideAllModals();
       document.getElementById('hud-overlay').classList.add('active');
 
+      const rw = window.innerWidth || 1280;
+      const rh = window.innerHeight || 720;
+      this.camera.aspect = rw / rh;
+      this.camera.updateProjectionMatrix();
+      if (this.renderer) {
+        this.renderer.setSize(rw, rh);
+      }
+
       // Mission Start Intro Announcement
       const banner = document.getElementById('hud-mission-start-banner');
       if (banner) {
@@ -1165,9 +1205,17 @@
       this.clearTrackEntities();
 
       const envInfo = window.ENVIRONMENTS[this.currentLevel.environment] || window.ENVIRONMENTS.city;
-      this.scene.background.setHex(envInfo.skyColor);
-      this.scene.fog.color.setHex(envInfo.fogColor);
-      this.scene.fog.density = envInfo.fogDensity;
+      if (!this.scene.background) {
+        this.scene.background = new THREE.Color(envInfo.skyColor);
+      } else {
+        this.scene.background.setHex(envInfo.skyColor);
+      }
+      if (!this.scene.fog) {
+        this.scene.fog = new THREE.FogExp2(envInfo.fogColor, envInfo.fogDensity);
+      } else {
+        this.scene.fog.color.setHex(envInfo.fogColor);
+        this.scene.fog.density = envInfo.fogDensity;
+      }
 
       this.ambientLight.color.setHex(envInfo.ambientLight);
       this.ambientLight.intensity = envInfo.ambientIntensity;
@@ -3052,7 +3100,13 @@
         this.sound.updateEngine(speedKmH, this.playerMaxSpeed * 3.6, this.input.gas || isNitro);
         this.updateHUD(speedKmH);
 
-        this.renderer.render(this.scene, this.camera);
+        try {
+          if (this.renderer && this.scene && this.camera) {
+            this.renderer.render(this.scene, this.camera);
+          }
+        } catch (renderErr) {
+          console.error('WebGL render error:', renderErr);
+        }
       }
 
       const garageModal = document.getElementById('modal-garage');
