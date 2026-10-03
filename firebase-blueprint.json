@@ -1,0 +1,45 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Stores user game progress, car unlocks, upgrades, stars, and coin balance.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "coins": { "type": "integer" },
+        "highestUnlockedLevel": { "type": "integer" },
+        "selectedCar": { "type": "string" },
+        "unlockedCars": { "type": "array" },
+        "carPaints": { "type": "object" },
+        "carUpgrades": { "type": "object" },
+        "levelStars": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "coins", "highestUnlockedLevel", "selectedCar"]
+    },
+    "LeaderboardEntry": {
+      "title": "Leaderboard Entry",
+      "description": "Global leaderboard record for level completion times and stars.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "level": { "type": "integer" },
+        "timeTaken": { "type": "number" },
+        "stars": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "level", "timeTaken", "stars"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document containing synced progress and vehicle state."
+    },
+    "/leaderboard/{entryId}": {
+      "schema": "LeaderboardEntry",
+      "description": "High score and fast completion records across players."
+    }
+  }
+}

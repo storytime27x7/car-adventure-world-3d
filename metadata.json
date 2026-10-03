@@ -1,0 +1,6 @@
+{
+  "name": "Car Adventure World 3D",
+  "description": "Mobile-first 3D cartoon car adventure game with 100 unique levels, missions, environments, garage upgrades, and responsive controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

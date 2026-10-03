@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Car Adventure World 3D</title>
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="screen-orientation" content="landscape">
+  <meta name="description" content="Car Adventure World 3D - Complete mobile-first 3D cartoon car adventure game with 100 levels, visible animated driver, garage tuning, missions, and rich environments.">
+  <link rel="stylesheet" href="style.css">
+  <!-- Load Three.js locally with CDN fallback for GitHub Pages / offline APK -->
+  <script src="js/three.min.js"></script>
+  <script>
+    if (typeof THREE === 'undefined') {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Game Canvas Container -->
+  <div id="game-container">
+    <canvas id="three-canvas"></canvas>
+  </div>
+
+  <!-- Portrait Orientation Warning for Mobile Devices -->
+  <div id="rotate-device-overlay">
+    <div class="rotate-icon">📱 ➔ 🔄</div>
+    <div class="rotate-title">Please Rotate Device</div>
+    <div class="rotate-desc">Car Adventure World 3D is designed for optimal landscape view. Turn your phone sideways to play!</div>
+  </div>
+
+  <!-- In-Game Heads-Up Display (HUD) -->
+  <div id="hud-overlay">
+    <!-- Top Bar -->
+    <div class="hud-top-bar">
+      <!-- Track Progress Bar -->
+      <div class="hud-pill hud-progress-wrap">
+        <div class="hud-progress-header">
+          <span id="hud-level-title">Level 1</span>
+          <span id="hud-dist-remaining">500m</span>
+        </div>
+        <div class="hud-progress-track">
+          <div id="hud-progress-fill" class="hud-progress-fill"></div>
+          <div id="hud-progress-car" class="hud-progress-car-marker">🚗</div>
+          <div class="hud-progress-finish-marker">🏁</div>
+        </div>
+      </div>
+
+      <!-- Mission Objective Banner -->
+      <div class="hud-objective-wrap">
+        <div class="hud-objective-title" id="hud-mission-type">Coin Rush</div>
+        <div class="hud-objective-val" id="hud-mission-text">Collect: 0 / 15</div>
+      </div>
+
+      <!-- Stats & Quick Actions -->
+      <div class="hud-stats-group">
+        <div class="hud-pill">
+          <span>🪙</span>
+          <span id="hud-coins" class="hud-coin-count">0</span>
+        </div>
+        <div class="hud-pill">
+          <span>⏱️</span>
+          <span id="hud-timer" class="hud-timer-count">00:45</span>
+        </div>
+        <button id="btn-camera" class="hud-icon-btn" title="Switch Camera (C)">🎥</button>
+        <button id="btn-lights" class="hud-icon-btn" title="Toggle Headlights (L)">💡</button>
+        <button id="btn-fullscreen" class="hud-icon-btn" title="Toggle Fullscreen">⛶</button>
+        <button id="btn-pause" class="hud-icon-btn" title="Pause Game (P/Esc)">⏸️</button>
+      </div>
+    </div>
+
+    <!-- Center/Bottom Speedometer & Gauges -->
+    <div class="hud-speedo-panel">
+      <div class="speed-digital-wrap">
+        <div id="hud-speed" class="speed-value">0</div>
+        <div class="speed-unit">KM / H</div>
+      </div>
+      <div class="gauges-col">
+        <div class="gauge-row">
+          <div class="gauge-label">
+            <span>NITRO</span>
+            <span id="hud-nitro-val">100%</span>
+          </div>
+          <div class="gauge-track">
+            <div id="hud-nitro-fill" class="gauge-fill-nitro"></div>
+          </div>
+        </div>
+        <div class="gauge-row">
+          <div class="gauge-label">
+            <span>HEALTH</span>
+            <span id="hud-health-val">100%</span>
+          </div>
+          <div class="gauge-track">
+            <div id="hud-health-fill" class="gauge-fill-health"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Touch Controls Overlay (Mobile-first responsive on-screen controls) -->
+  <div id="touch-controls-layer">
+    <!-- Left Hand: Steering Left & Right -->
+    <div class="touch-cluster-left">
+      <button id="btn-steer-left" class="touch-btn btn-steer" aria-label="Steer Left">
+        <span>◀</span>
+        <span class="touch-btn-sub">LEFT</span>
+      </button>
+      <button id="btn-steer-right" class="touch-btn btn-steer" aria-label="Steer Right">
+        <span>▶</span>
+        <span class="touch-btn-sub">RIGHT</span>
+      </button>
+    </div>
+
+    <!-- Right Hand: Nitro, Horn, Brake, Gas -->
+    <div class="touch-cluster-right">
+      <div class="touch-small-cluster">
+        <button id="btn-nitro" class="touch-btn btn-nitro" aria-label="Nitro Boost">
+          <span>⚡</span>
+          <span class="touch-btn-sub">NITRO</span>
+        </button>
+        <button id="btn-horn" class="touch-btn btn-horn" aria-label="Honk Horn">
+          <span>📯</span>
+        </button>
+      </div>
+      <button id="btn-brake" class="touch-btn btn-brake" aria-label="Brake and Reverse">
+        <span>▼</span>
+        <span class="touch-btn-sub">BRAKE</span>
+      </button>
+      <button id="btn-gas" class="touch-btn btn-gas" aria-label="Accelerate Gas">
+        <span>▲</span>
+        <span class="touch-btn-sub">GAS</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MODAL: Main Menu -->
+  <div id="modal-main-menu" class="modal-screen active">
+    <div class="game-title-wrap">
+      <div class="game-title-badge">3D Cartoon Driving Adventure</div>
+      <h1 class="game-title">CAR ADVENTURE<br>WORLD 3D</h1>
+      <p class="game-subtitle">100 Levels • 6 Missions • 10 Beautiful Worlds • Custom Garage</p>
+    </div>
+
+    <div class="menu-buttons-grid">
+      <button id="btn-menu-play" class="btn-primary-action">
+        <span>🚗</span>
+        <span id="menu-play-text">PLAY LEVEL 1</span>
+      </button>
+      <button id="btn-menu-garage" class="btn-secondary-action">
+        <span>🔧</span>
+        <span>GARAGE</span>
+      </button>
+      <button id="btn-menu-levels" class="btn-secondary-action">
+        <span>🗺️</span>
+        <span>100 LEVELS</span>
+      </button>
+      <button id="btn-menu-settings" class="btn-secondary-action">
+        <span>⚙️</span>
+        <span>SETTINGS</span>
+      </button>
+    </div>
+
+    <div class="main-menu-footer">
+      <div>🪙 Coins: <strong id="menu-coin-count">0</strong></div>
+      <div>⭐ Total Stars: <strong id="menu-star-count">0 / 300</strong></div>
+    </div>
+  </div>
+
+  <!-- MODAL: Level Select (100 Levels Grid) -->
+  <div id="modal-level-select" class="modal-screen">
+    <div class="dialog-container">
+      <div class="dialog-header">
+        <div class="dialog-title">
+          <span>🗺️</span>
+          <span>SELECT ADVENTURE LEVEL</span>
+        </div>
+        <button id="btn-close-levels" class="btn-close-dialog">✕</button>
+      </div>
+
+      <!-- Pagination tabs: 1-20, 21-40, 41-60, 61-80, 81-100 -->
+      <div class="level-pagination" id="level-pagination-tabs"></div>
+
+      <!-- Grid of 20 levels per page -->
+      <div class="levels-grid" id="levels-grid-container"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: Garage & Car Tuning -->
+  <div id="modal-garage" class="modal-screen">
+    <div class="dialog-container" style="max-width: 960px;">
+      <div class="dialog-header">
+        <div class="dialog-title">
+          <span>🔧</span>
+          <span>CUSTOM GARAGE & TUNING</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <div class="hud-pill">🪙 <strong id="garage-coins-val">0</strong></div>
+          <button id="btn-close-garage" class="btn-close-dialog">✕</button>
+        </div>
+      </div>
+
+      <div class="garage-layout">
+        <!-- 3D Car Turntable Display -->
+        <div class="garage-3d-view">
+          <canvas id="garage-canvas"></canvas>
+          <div class="garage-car-switch">
+            <button id="garage-prev-car" class="garage-nav-btn">◀</button>
+            <span id="garage-car-name" class="garage-car-title">Bumblebug Compact</span>
+            <button id="garage-next-car" class="garage-nav-btn">▶</button>
+          </div>
+        </div>
+
+        <!-- Upgrades & Paint Controls -->
+        <div class="garage-tuning-panel">
+          <div id="garage-unlock-status" style="display: flex; justify-content: space-between; align-items: center;">
+            <div id="garage-car-type" style="font-size: 13px; color: var(--primary-gold); font-weight: 700;">Classic Compact</div>
+            <button id="garage-unlock-btn" class="garage-upgrade-btn" style="display: none;">UNLOCK FOR 500 🪙</button>
+          </div>
+          <p id="garage-car-desc" style="font-size: 12px; color: var(--muted-text);"></p>
+
+          <!-- Upgrades List -->
+          <div class="garage-stat-row">
+            <div class="garage-stat-header">
+              <span>TOP SPEED</span>
+              <span id="stat-speed-lvl">LVL 1</span>
+            </div>
+            <div class="garage-stat-track"><div id="stat-speed-fill" class="garage-stat-fill"></div></div>
+            <button id="btn-upgrade-speed" class="garage-upgrade-btn">UPGRADE SPEED (80 🪙)</button>
+          </div>
+
+          <div class="garage-stat-row">
+            <div class="garage-stat-header">
+              <span>ACCELERATION</span>
+              <span id="stat-accel-lvl">LVL 1</span>
+            </div>
+            <div class="garage-stat-track"><div id="stat-accel-fill" class="garage-stat-fill"></div></div>
+            <button id="btn-upgrade-accel" class="garage-upgrade-btn">UPGRADE ACCEL (80 🪙)</button>
+          </div>
+
+          <div class="garage-stat-row">
+            <div class="garage-stat-header">
+              <span>STEERING HANDLING</span>
+              <span id="stat-handling-lvl">LVL 1</span>
+            </div>
+            <div class="garage-stat-track"><div id="stat-handling-fill" class="garage-stat-fill"></div></div>
+            <button id="btn-upgrade-handling" class="garage-upgrade-btn">UPGRADE HANDLING (80 🪙)</button>
+          </div>
+
+          <div class="garage-stat-row">
+            <div class="garage-stat-header">
+              <span>NITRO BOOST</span>
+              <span id="stat-nitro-lvl">LVL 1</span>
+            </div>
+            <div class="garage-stat-track"><div id="stat-nitro-fill" class="garage-stat-fill"></div></div>
+            <button id="btn-upgrade-nitro" class="garage-upgrade-btn">UPGRADE NITRO (80 🪙)</button>
+          </div>
+
+          <div class="garage-stat-row">
+            <div class="garage-stat-header">
+              <span>SUSPENSION BOUNCE</span>
+              <span id="stat-susp-lvl">LVL 1</span>
+            </div>
+            <div class="garage-stat-track"><div id="stat-susp-fill" class="garage-stat-fill"></div></div>
+            <button id="btn-upgrade-susp" class="garage-upgrade-btn">UPGRADE SUSPENSION (80 🪙)</button>
+          </div>
+
+          <!-- Custom Paint Palette -->
+          <div class="garage-paint-title">Custom Paint Finish</div>
+          <div class="garage-paint-swatches" id="garage-paint-swatches"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Pause Screen -->
+  <div id="modal-pause" class="modal-screen">
+    <div class="dialog-container" style="max-width: 440px; text-align: center;">
+      <h2 style="font-size: 28px; font-weight: 900; color: var(--primary-gold); margin-bottom: 20px;">GAME PAUSED</h2>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <button id="btn-pause-resume" class="btn-primary-action" style="justify-content: center;">RESUME GAME</button>
+        <button id="btn-pause-restart" class="btn-secondary-action" style="justify-content: center;">RESTART LEVEL</button>
+        <button id="btn-pause-levels" class="btn-secondary-action" style="justify-content: center;">SELECT LEVEL</button>
+        <button id="btn-pause-garage" class="btn-secondary-action" style="justify-content: center;">VISIT GARAGE</button>
+        <button id="btn-pause-menu" class="btn-secondary-action" style="justify-content: center;">MAIN MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Victory / Level Complete -->
+  <div id="modal-victory" class="modal-screen">
+    <div class="result-card">
+      <div style="font-size: 13px; font-weight: 800; color: var(--primary-gold); text-transform: uppercase;">VICTORY!</div>
+      <h2 style="font-size: 32px; font-weight: 900; color: #fff;">LEVEL COMPLETED</h2>
+
+      <div class="result-stars-row">
+        <span id="vic-star-1" class="star-pop">⭐</span>
+        <span id="vic-star-2" class="star-pop">⭐</span>
+        <span id="vic-star-3" class="star-pop">⭐</span>
+      </div>
+
+      <div class="result-metrics-grid">
+        <div class="result-metric-item">
+          <span class="result-metric-lbl">TIME TAKEN</span>
+          <span id="vic-time-val" class="result-metric-val">00:32</span>
+        </div>
+        <div class="result-metric-item">
+          <span class="result-metric-lbl">COINS EARNED</span>
+          <span id="vic-coins-val" class="result-metric-val">+140 🪙</span>
+        </div>
+        <div class="result-metric-item">
+          <span class="result-metric-lbl">MISSION</span>
+          <span id="vic-mission-val" class="result-metric-val">Completed</span>
+        </div>
+        <div class="result-metric-item">
+          <span class="result-metric-lbl">NEW BALANCE</span>
+          <span id="vic-balance-val" class="result-metric-val">580 🪙</span>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+        <button id="btn-vic-next" class="btn-primary-action">NEXT LEVEL ➔</button>
+        <button id="btn-vic-replay" class="btn-secondary-action">REPLAY</button>
+        <button id="btn-vic-garage" class="btn-secondary-action">GARAGE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Game Over / Failed -->
+  <div id="modal-game-over" class="modal-screen">
+    <div class="result-card fail">
+      <div style="font-size: 40px; margin-bottom: 6px;">💥</div>
+      <h2 id="fail-title" style="font-size: 30px; font-weight: 900; color: var(--primary-red);">CAR WRECKED!</h2>
+      <p id="fail-reason" style="font-size: 14px; color: var(--muted-text); margin: 8px 0 20px;">Your car took critical collision damage.</p>
+
+      <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+        <button id="btn-fail-retry" class="btn-primary-action" style="background: linear-gradient(135deg, #ff3b30, #b71c1c); color: #fff;">TRY AGAIN</button>
+        <button id="btn-fail-garage" class="btn-secondary-action">UPGRADE IN GARAGE</button>
+        <button id="btn-fail-menu" class="btn-secondary-action">MAIN MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Settings -->
+  <div id="modal-settings" class="modal-screen">
+    <div class="dialog-container" style="max-width: 480px;">
+      <div class="dialog-header">
+        <div class="dialog-title"><span>⚙️</span><span>SETTINGS</span></div>
+        <button id="btn-close-settings" class="btn-close-dialog">✕</button>
+      </div>
+
+      <div class="settings-list">
+        <div class="setting-item">
+          <span>Engine Sound Volume</span>
+          <input type="range" id="setting-engine-vol" class="setting-slider" min="0" max="100" value="70">
+        </div>
+        <div class="setting-item">
+          <span>Sound Effects (SFX)</span>
+          <input type="range" id="setting-sfx-vol" class="setting-slider" min="0" max="100" value="80">
+        </div>
+        <div class="setting-item">
+          <span>Graphics Quality</span>
+          <select id="setting-graphics" style="background: #1e293b; color: #fff; padding: 6px 12px; border-radius: 6px; border: 1px solid #475569;">
+            <option value="high">High (Full Shadows & Shaders)</option>
+            <option value="medium" selected>Medium (Optimized 60 FPS)</option>
+            <option value="low">Low (Fast Performance)</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <span>Reset Saved Progress</span>
+          <button id="btn-reset-save" style="background: #e53935; color: #fff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; cursor: pointer;">RESET ALL DATA</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio and Game Logic Scripts -->
+  <script src="cars.js"></script>
+  <script src="levels.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
